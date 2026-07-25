@@ -1,0 +1,6 @@
+{
+  "name": "Manajemen RAB & Kurva S Proyek",
+  "description": "Aplikasi manajemen RAB proyek konstruksi dengan visualisasi Kurva S Rencana vs Aktual, timeline distribusi bobot, dan pelaporan harian.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
