@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidProject(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.code is string && data.code.size() <= 100 &&
+             data.client is string && data.client.size() <= 200 &&
+             data.startDate is string && data.startDate.size() <= 30 &&
+             data.endDate is string && data.endDate.size() <= 30 &&
+             data.totalPeriods is number && data.totalPeriods >= 1 && data.totalPeriods <= 500 &&
+             data.totalContractValue is number && data.totalContractValue >= 0 &&
+             (!('location' in data) || (data.location is string && data.location.size() <= 300)) &&
+             (!('contractor' in data) || (data.contractor is string && data.contractor.size() <= 200)) &&
+             (!('periodType' in data) || (data.periodType in ['weekly', 'monthly'])) &&
+             (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128)) &&
+             (!('rabItems' in data) || (data.rabItems is list)) &&
+             (!('plannedDistributions' in data) || (data.plannedDistributions is list)) &&
+             (!('dailyReports' in data) || (data.dailyReports is list));
+    }
+
+    // Projects collection
+    match /projects/{projectId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(projectId) && isValidProject(incoming());
+      allow update: if isSignedIn() && isValidId(projectId) && isValidProject(incoming());
+      allow delete: if isSignedIn() && isValidId(projectId);
+    }
+  }
+}

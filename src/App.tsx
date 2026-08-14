@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Project, RabItem, PlannedPeriodDistribution, DailyReportItem } from './types/project';
 import { sampleProject } from './data/sampleProject';
 import { Navbar } from './components/Navbar';
@@ -9,12 +9,33 @@ import { TimelinePlanner } from './components/TimelinePlanner';
 import { DailyReport } from './components/DailyReport';
 import { ProjectModal } from './components/ProjectModal';
 import { generateAutoPlannedDistributions, recalculateRabItems } from './utils/calculator';
-import { HardHat, Layers, FileSpreadsheet, CalendarRange, ClipboardList, RefreshCw } from 'lucide-react';
+import { useFirebase } from './firebase/FirebaseContext';
+import {
+  HardHat,
+  Cloud,
+  CloudCheck,
+  CheckCircle2,
+  Sparkles,
+  LogIn,
+  AlertCircle,
+  UploadCloud,
+  Loader2,
+} from 'lucide-react';
 
 const LOCAL_STORAGE_KEY = 'rab_kurva_s_projects_v1';
 const LOCAL_STORAGE_ACTIVE_ID = 'rab_kurva_s_active_id_v1';
 
 export default function App() {
+  const {
+    user,
+    cloudProjects,
+    syncProjectToCloud,
+    deleteProjectFromCloud,
+    isSyncing,
+    syncStatus,
+    signInWithGoogle,
+  } = useFirebase();
+
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -40,6 +61,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+  const [cloudBannerDismissed, setCloudBannerDismissed] = useState(false);
 
   // Sync to local storage
   useEffect(() => {
@@ -51,27 +73,72 @@ export default function App() {
     }
   }, [projects, activeProjectId]);
 
+  // Sync Firestore Cloud Projects into local state when user logs in
+  useEffect(() => {
+    if (user) {
+      if (cloudProjects && cloudProjects.length > 0) {
+        setProjects(cloudProjects);
+        if (!cloudProjects.some((p) => p.id === activeProjectId)) {
+          setActiveProjectId(cloudProjects[0].id);
+        }
+      } else if (projects.length > 0) {
+        // If user is logged in but cloud has no projects yet, sync current local projects to cloud
+        projects.forEach((proj) => {
+          syncProjectToCloud(proj).catch((err) => {
+            console.error('Initial cloud seed error:', err);
+          });
+        });
+      }
+    }
+  }, [user, cloudProjects]);
+
   // Find active project or fallback to first
-  const currentProject = projects.find((p) => p.id === activeProjectId) || projects[0] || sampleProject;
+  const currentProject =
+    projects.find((p) => p.id === activeProjectId) || projects[0] || sampleProject;
+
+  // Helper to persist and sync project
+  const updateAndSyncProject = useCallback(
+    (updatedProject: Project) => {
+      setProjects((prev) =>
+        prev.map((p) => (p.id === updatedProject.id ? updatedProject : p))
+      );
+      if (user) {
+        syncProjectToCloud(updatedProject).catch((err) => {
+          console.error('Cloud auto-sync error:', err);
+        });
+      }
+    },
+    [user, syncProjectToCloud]
+  );
+
+  // Manual Trigger to save current project to Firebase Firestore
+  const handleManualCloudSync = async () => {
+    if (!user) {
+      await signInWithGoogle();
+      return;
+    }
+    if (currentProject) {
+      await syncProjectToCloud(currentProject);
+      alert(`Proyek "${currentProject.name}" berhasil disinkronkan ke Firebase Firestore!`);
+    }
+  };
 
   // Handle updating RAB Items for current project
   const handleUpdateProjectRab = (updatedItems: RabItem[], totalContractValue: number) => {
-    setProjects((prev) =>
-      prev.map((p) => {
-        if (p.id !== currentProject.id) return p;
-
-        // Auto regenerate planned distributions for new RAB items if needed
-        const newDistributions = generateAutoPlannedDistributions(updatedItems, p.totalPeriods);
-
-        return {
-          ...p,
-          rabItems: updatedItems,
-          totalContractValue,
-          plannedDistributions: newDistributions,
-          lastUpdateDate: new Date().toISOString().split('T')[0],
-        };
-      })
+    const newDistributions = generateAutoPlannedDistributions(
+      updatedItems,
+      currentProject.totalPeriods
     );
+
+    const updated: Project = {
+      ...currentProject,
+      rabItems: updatedItems,
+      totalContractValue,
+      plannedDistributions: newDistributions,
+      lastUpdateDate: new Date().toISOString().split('T')[0],
+    };
+
+    updateAndSyncProject(updated);
   };
 
   // Handle updating Timeline distributions for current project
@@ -81,52 +148,45 @@ export default function App() {
     startDate: string,
     endDate: string
   ) => {
-    setProjects((prev) =>
-      prev.map((p) => {
-        if (p.id !== currentProject.id) return p;
-        return {
-          ...p,
-          plannedDistributions: updatedDistributions,
-          totalPeriods,
-          startDate,
-          endDate,
-          lastUpdateDate: new Date().toISOString().split('T')[0],
-        };
-      })
-    );
+    const updated: Project = {
+      ...currentProject,
+      plannedDistributions: updatedDistributions,
+      totalPeriods,
+      startDate,
+      endDate,
+      lastUpdateDate: new Date().toISOString().split('T')[0],
+    };
+
+    updateAndSyncProject(updated);
   };
 
   // Handle adding Daily Report
-  const handleAddDailyReport = (newReportData: Omit<DailyReportItem, 'id' | 'createdAt'>) => {
+  const handleAddDailyReport = (
+    newReportData: Omit<DailyReportItem, 'id' | 'createdAt'>
+  ) => {
     const newReport: DailyReportItem = {
       ...newReportData,
       id: `rep-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
 
-    setProjects((prev) =>
-      prev.map((p) => {
-        if (p.id !== currentProject.id) return p;
-        return {
-          ...p,
-          dailyReports: [newReport, ...p.dailyReports],
-          lastUpdateDate: newReportData.date,
-        };
-      })
-    );
+    const updated: Project = {
+      ...currentProject,
+      dailyReports: [newReport, ...currentProject.dailyReports],
+      lastUpdateDate: newReportData.date,
+    };
+
+    updateAndSyncProject(updated);
   };
 
   // Handle deleting Daily Report
   const handleDeleteDailyReport = (reportId: string) => {
-    setProjects((prev) =>
-      prev.map((p) => {
-        if (p.id !== currentProject.id) return p;
-        return {
-          ...p,
-          dailyReports: p.dailyReports.filter((r) => r.id !== reportId),
-        };
-      })
-    );
+    const updated: Project = {
+      ...currentProject,
+      dailyReports: currentProject.dailyReports.filter((r) => r.id !== reportId),
+    };
+
+    updateAndSyncProject(updated);
   };
 
   // Handle create new project
@@ -150,7 +210,10 @@ export default function App() {
       totalPeriods: projectData.totalPeriods || 12,
       totalContractValue: totalValue,
       rabItems: recalculatedRab,
-      plannedDistributions: generateAutoPlannedDistributions(recalculatedRab, projectData.totalPeriods || 12),
+      plannedDistributions: generateAutoPlannedDistributions(
+        recalculatedRab,
+        projectData.totalPeriods || 12
+      ),
       dailyReports: [],
       lastUpdateDate: projectData.startDate || '2026-07-01',
     };
@@ -158,14 +221,27 @@ export default function App() {
     setProjects((prev) => [newProj, ...prev]);
     setActiveProjectId(newProj.id);
     setActiveTab('rab-import');
+
+    if (user) {
+      syncProjectToCloud(newProj).catch((err) =>
+        console.error('Failed to sync new project to Firestore:', err)
+      );
+    }
   };
 
   // Reset to default sample project
   const handleResetSampleData = () => {
-    if (window.confirm('Apakah Anda yakin ingin merefresh demo data ke proyek sampel bawaan?')) {
+    if (
+      window.confirm(
+        'Apakah Anda yakin ingin merefresh demo data ke proyek sampel bawaan?'
+      )
+    ) {
       setProjects([sampleProject]);
       setActiveProjectId(sampleProject.id);
       setActiveTab('dashboard');
+      if (user) {
+        syncProjectToCloud(sampleProject);
+      }
     }
   };
 
@@ -178,6 +254,7 @@ export default function App() {
         onSelectProject={(id) => setActiveProjectId(id)}
         onOpenNewProjectModal={() => setIsProjectModalOpen(true)}
         onResetSampleData={handleResetSampleData}
+        onManualCloudSync={handleManualCloudSync}
       />
 
       {/* Main Navigation Tabs */}
@@ -189,7 +266,78 @@ export default function App() {
       />
 
       {/* Primary Workspace View Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
+        {/* Firebase Cloud Sync Banner */}
+        {!cloudBannerDismissed && (
+          <div
+            className={`p-3.5 sm:p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs transition-all ${
+              user
+                ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                : 'bg-amber-50/90 border-amber-200 text-amber-950'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                  user
+                    ? 'bg-emerald-500/20 text-emerald-700'
+                    : 'bg-amber-500/20 text-amber-700'
+                }`}
+              >
+                {user ? (
+                  <CloudCheck className="w-5 h-5" />
+                ) : (
+                  <Sparkles className="w-5 h-5" />
+                )}
+              </div>
+              <div>
+                <p className="font-bold">
+                  {user
+                    ? `Firebase Firestore Aktif • Terhubung sebagai ${user.displayName || user.email}`
+                    : 'Penyimpanan Lokal Aktif • Masuk dengan Google untuk Sinkronisasi Cloud Firebase'}
+                </p>
+                <p className="text-[11px] opacity-80 mt-0.5">
+                  {user
+                    ? 'Semua perubahan RAB, kurva S, jadwal minggu, dan laporan harian otomatis tersimpan ke cloud secara realtime.'
+                    : 'Simpan proyek ke database cloud Firestore agar dapat diakses kapan saja dari perangkat manapun.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+              {!user ? (
+                <button
+                  onClick={signInWithGoogle}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-xs cursor-pointer transition-colors"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Login Google Cloud</span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleManualCloudSync}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-xs cursor-pointer transition-colors disabled:opacity-60"
+                >
+                  {isSyncing ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <UploadCloud className="w-3.5 h-3.5" />
+                  )}
+                  <span>Sinkronkan Sekarang</span>
+                </button>
+              )}
+              <button
+                onClick={() => setCloudBannerDismissed(true)}
+                className="text-slate-400 hover:text-slate-600 px-2 py-1 cursor-pointer font-medium"
+                title="Tutup banner"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'dashboard' && (
           <Dashboard
             project={currentProject}
@@ -226,11 +374,14 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
           <div className="flex items-center gap-2">
             <HardHat className="w-4 h-4 text-amber-500" />
-            <span className="font-bold text-slate-200">RAB & Kurva S Proyek Konstruksi</span>
-            <span>• Solusi Pengawasan Progres Biaya & Waktu</span>
+            <span className="font-bold text-slate-200">
+              RAB &amp; Kurva S Proyek Konstruksi
+            </span>
+            <span>• Solusi Pengawasan Progres Biaya &amp; Waktu</span>
           </div>
-          <p className="text-slate-500">
-            Sistem Kurva S Rencana vs Realisasi Aktual • Powered by React & Recharts
+          <p className="text-slate-500 flex items-center gap-1.5 justify-center sm:justify-end">
+            <Cloud className="w-3.5 h-3.5 text-amber-400" />
+            <span>Integrated with Firebase Firestore &amp; Auth</span>
           </p>
         </div>
       </footer>
@@ -244,3 +395,4 @@ export default function App() {
     </div>
   );
 }
+
