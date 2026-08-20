@@ -16,6 +16,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isMasterAdmin() {
+      return isSignedIn() && 
+        'email' in request.auth.token && 
+        request.auth.token.email.lower() == 'tisnasatrio21@gmail.com';
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -42,12 +48,30 @@ service cloud.firestore {
              (!('dailyReports' in data) || (data.dailyReports is list));
     }
 
+    function isValidDevice(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.deviceName is string && data.deviceName.size() > 0 && data.deviceName.size() <= 200 &&
+             data.status is string && data.status in ['pending', 'approved', 'rejected'] &&
+             data.requestedAt is string && data.requestedAt.size() <= 50 &&
+             (!('userAgent' in data) || (data.userAgent is string && data.userAgent.size() <= 500)) &&
+             (!('approvedAt' in data) || (data.approvedAt is string && data.approvedAt.size() <= 50)) &&
+             (!('approvedBy' in data) || (data.approvedBy is string && data.approvedBy.size() <= 128));
+    }
+
     // Projects collection
     match /projects/{projectId} {
       allow get, list: if isSignedIn();
       allow create: if isSignedIn() && isValidId(projectId) && isValidProject(incoming());
       allow update: if isSignedIn() && isValidId(projectId) && isValidProject(incoming());
       allow delete: if isSignedIn() && isValidId(projectId);
+    }
+
+    // Authorized Devices Security Collection
+    match /authorized_devices/{deviceId} {
+      allow get, list: if true; // Allow client to check its own device approval status
+      allow create: if isValidId(deviceId) && isValidDevice(incoming());
+      allow update: if isMasterAdmin() || (isValidId(deviceId) && isValidDevice(incoming()));
+      allow delete: if isMasterAdmin();
     }
   }
 }

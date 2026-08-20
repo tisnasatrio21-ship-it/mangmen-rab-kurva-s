@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Project, DailyReportItem, RabItem } from '../types/project';
 import { getPeriodNumberForDate, formatPercent, formatIDR } from '../utils/calculator';
 import { CameraCaptureModal } from './CameraCaptureModal';
+import { generateProjectPdfReport, generateDailyReportPdf } from '../utils/pdfExporter';
+import { exportDailyReportsToCsv } from '../utils/dataExporter';
 import {
   ClipboardList,
   PlusCircle,
@@ -21,6 +23,8 @@ import {
   MapPin,
   Clock,
   Upload,
+  Download,
+  Loader2,
 } from 'lucide-react';
 
 interface DailyReportProps {
@@ -40,6 +44,34 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterWeek, setFilterWeek] = useState<string>('all');
   const [submitSuccessMsg, setSubmitSuccessMsg] = useState<string | null>(null);
+  const [isExportingAllPdf, setIsExportingAllPdf] = useState(false);
+  const [exportingReportId, setExportingReportId] = useState<string | null>(null);
+
+  // Export all documentation photos to PDF
+  const handleExportFullReportPdf = async () => {
+    setIsExportingAllPdf(true);
+    try {
+      await generateProjectPdfReport(project);
+    } catch (err) {
+      console.error('Failed to export PDF:', err);
+      alert('Gagal mengekspor dokumen PDF.');
+    } finally {
+      setIsExportingAllPdf(false);
+    }
+  };
+
+  // Export single daily sheet to PDF
+  const handleExportDailyItemPdf = async (report: DailyReportItem) => {
+    setExportingReportId(report.id);
+    try {
+      await generateDailyReportPdf(project, report);
+    } catch (err) {
+      console.error('Failed to export daily PDF:', err);
+      alert('Gagal mengekspor lembar laporan harian.');
+    } finally {
+      setExportingReportId(null);
+    }
+  };
 
   // Default Form State
   const [formDate, setFormDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -170,16 +202,41 @@ export const DailyReport: React.FC<DailyReportProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setIsFormOpen(true);
-            setFormDate(new Date().toISOString().split('T')[0]);
-          }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-xs rounded-xl shadow transition-colors cursor-pointer"
-        >
-          <PlusCircle className="w-4 h-4" />
-          <span>Input Laporan Harian Baru</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <button
+            onClick={() => exportDailyReportsToCsv(project)}
+            className="flex items-center gap-1.5 px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 shadow-xs transition-colors cursor-pointer"
+            title="Export Rekap Laporan Harian ke Format CSV"
+          >
+            <Download className="w-4 h-4 text-purple-600" />
+            <span>Export CSV</span>
+          </button>
+
+          <button
+            onClick={handleExportFullReportPdf}
+            disabled={isExportingAllPdf}
+            className="flex items-center gap-2 px-3.5 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 font-bold text-xs rounded-xl border border-amber-500/40 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            title="Export Laporan Lengkap dengan Lampiran Foto & Kurva S ke PDF"
+          >
+            {isExportingAllPdf ? (
+              <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+            ) : (
+              <Download className="w-4 h-4 text-amber-600" />
+            )}
+            <span>Export Laporan + Foto (PDF)</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setIsFormOpen(true);
+              setFormDate(new Date().toISOString().split('T')[0]);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-xs rounded-xl shadow transition-colors cursor-pointer"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span>Input Laporan Harian Baru</span>
+          </button>
+        </div>
       </div>
 
       {submitSuccessMsg && (
@@ -518,13 +575,29 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                     </span>
                   </div>
 
-                  <button
-                    onClick={() => onDeleteDailyReport(report.id)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                    title="Hapus Laporan Ini"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleExportDailyItemPdf(report)}
+                      disabled={exportingReportId === report.id}
+                      className="px-2 py-1.5 text-[11px] font-semibold text-slate-700 hover:text-amber-700 bg-slate-100 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                      title="Cetak Lembar Laporan Harian Ini ke PDF"
+                    >
+                      {exportingReportId === report.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5" />
+                      )}
+                      <span>Cetak PDF</span>
+                    </button>
+
+                    <button
+                      onClick={() => onDeleteDailyReport(report.id)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                      title="Hapus Laporan Ini"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))

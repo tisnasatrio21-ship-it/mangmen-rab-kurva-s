@@ -1,15 +1,34 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { Project } from '../types/project';
+import { Project, DailyReportItem } from '../types/project';
 import { calculateSCurvePoints, getProjectKPI, formatIDR, formatPercent } from './calculator';
 
 export interface ExportPdfOptions {
   chartElementId?: string;
   reportNotes?: string;
+  targetDailyReportId?: string; // If specified, generate daily-specific inspection sheet
+  targetDate?: string; // If specified, filter daily reports by this date
 }
 
 /**
- * Generate a clean, professional PDF Executive Progress Report for Project Owners & Stakeholders
+ * Loads an image from URL/dataURL into HTMLImageElement or returns null if fails
+ */
+async function loadImg(src: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    if (!src) return resolve(null);
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => {
+      console.warn('Failed to load image for PDF:', src);
+      resolve(null);
+    };
+    img.src = src;
+  });
+}
+
+/**
+ * Generate a clean, professional PDF Executive Progress Report with Photos & Daily Inspections
  */
 export async function generateProjectPdfReport(
   project: Project,
@@ -22,7 +41,6 @@ export async function generateProjectPdfReport(
   });
 
   const kpi = getProjectKPI(project);
-  const sPoints = calculateSCurvePoints(project);
   const printDate = new Date().toLocaleDateString('id-ID', {
     day: 'numeric',
     month: 'long',
@@ -65,21 +83,19 @@ export async function generateProjectPdfReport(
   let currentY = 15;
 
   // --- PAGE 1: HEADER & TITLE BANNER ---
-  // Top Banner Accent
   doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
   doc.rect(0, 0, 210, 24, 'F');
 
   doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
   doc.rect(0, 24, 210, 2, 'F');
 
-  // Title Text on Banner
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.text('LAPORAN EKSEKUTIF PROGRES PROYEK KONSTRUKSI', 14, 13);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.text(`Sistem Monitoring RAB & Kurva S • Tanggal Cetak: ${printDate}`, 14, 19);
 
   currentY = 32;
@@ -121,7 +137,6 @@ export async function generateProjectPdfReport(
 
   currentY += 4;
 
-  // 4 KPI Cards
   const cardWidth = 43;
   const cardHeight = 26;
   const cardGap = 3.3;
@@ -226,7 +241,7 @@ export async function generateProjectPdfReport(
 
         const imgWidth = 182;
         const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        const constrainedHeight = Math.min(imgHeight, 60);
+        const constrainedHeight = Math.min(imgHeight, 55);
 
         doc.addImage(imgData, 'PNG', 14, currentY, imgWidth, constrainedHeight);
         currentY += constrainedHeight + 8;
@@ -236,13 +251,12 @@ export async function generateProjectPdfReport(
     }
   }
 
-  // Check Page overflow before Category Table
-  if (currentY > 220) {
+  // --- CATEGORY PROGRESS SUMMARY TABLE ---
+  if (currentY > 215) {
     doc.addPage();
     currentY = 18;
   }
 
-  // --- CATEGORY PROGRESS SUMMARY TABLE ---
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
@@ -308,7 +322,6 @@ export async function generateProjectPdfReport(
 
   currentY = 18;
 
-  // Detail RAB Table Header
   const renderDetailTableHeader = (yPos: number) => {
     doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
     doc.rect(14, yPos, 182, 7, 'F');
@@ -330,7 +343,6 @@ export async function generateProjectPdfReport(
   currentY += 7;
 
   project.rabItems.forEach((item, idx) => {
-    // Check page height limit
     if (currentY > 265) {
       doc.addPage();
       currentY = 15;
@@ -340,7 +352,6 @@ export async function generateProjectPdfReport(
 
     const actualVol = itemActualVolMap.get(item.id) || 0;
     const ratio = Math.min(1, actualVol / (item.volume || 1));
-    const actualWeight = item.weightPercentage * ratio;
     const pctDone = ratio * 100;
 
     const isEven = idx % 2 === 0;
@@ -388,7 +399,126 @@ export async function generateProjectPdfReport(
     currentY += 6;
   });
 
-  currentY += 10;
+  // --- SECTION: LAMPIRAN DOKUMENTASI FOTO LAPANGAN & LAPORAN HARIAN ---
+  // Filter reports with photos or all reports if targeted
+  const reportsWithPhotos = project.dailyReports.filter((r) => Boolean(r.photoUrl));
+  const reportsToDisplay = options.targetDailyReportId
+    ? project.dailyReports.filter((r) => r.id === options.targetDailyReportId)
+    : options.targetDate
+    ? project.dailyReports.filter((r) => r.date === options.targetDate)
+    : project.dailyReports;
+
+  // If there are reports with photos or daily entries, attach Photo Documentation Pages
+  if (reportsToDisplay.length > 0) {
+    doc.addPage();
+    currentY = 15;
+
+    // Header Banner
+    doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+    doc.rect(0, 0, 210, 12, 'F');
+    doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+    doc.rect(0, 12, 210, 1.5, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(`LAMPIRAN DOKUMENTASI FOTO & LAPORAN HARIAN LAPANGAN`, 14, 8);
+
+    currentY = 20;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+    doc.text('DOKUMENTASI FOTO FISIK PEKERJAAN TERBARU', 14, currentY);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
+    doc.text('Foto dilengkapi dengan Timestamp waktu, Koordinat GPS Lapangan, dan Watermark Inspeksi.', 14, currentY + 4.5);
+
+    currentY += 10;
+
+    // Sort newest first
+    const sortedReports = [...reportsToDisplay].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+
+    for (let i = 0; i < sortedReports.length; i++) {
+      const report = sortedReports[i];
+      const hasPhoto = Boolean(report.photoUrl);
+      const cardH = hasPhoto ? 82 : 28;
+
+      // Check if page needs break
+      if (currentY + cardH > 270) {
+        doc.addPage();
+        currentY = 15;
+        doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+        doc.rect(0, 0, 210, 12, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(`LAMPIRAN DOKUMENTASI FOTO (LANJUTAN) - ${project.name}`, 14, 8);
+        currentY = 20;
+      }
+
+      // Container Card
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(14, currentY, 182, cardH, 2, 2, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(14, currentY, 182, cardH, 2, 2, 'D');
+
+      // Left Accent Strip
+      doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+      doc.rect(14, currentY, 3, cardH, 'F');
+
+      // Header of report item
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+      doc.text(`Tgl: ${report.date} (Minggu ke-${report.periodNumber}) • [${report.rabItemCode || 'RAB'}] ${report.rabItemDescription}`, 21, currentY + 6);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Pelapor / Inspector: ${report.reporterName || 'Site Staff'} | Penambahan Volume: ${report.volumeProgress} unit (+${formatPercent(report.weightAdded)} Bobot)`, 21, currentY + 11);
+
+      // Notes
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(51, 65, 85);
+      const safeNotes = report.notes ? `"${report.notes}"` : 'Tidak ada catatan khusus.';
+      const splitNotes = doc.splitTextToSize(safeNotes, hasPhoto ? 88 : 170);
+      doc.text(splitNotes, 21, currentY + 17);
+
+      // Render Photo if exists
+      if (hasPhoto && report.photoUrl) {
+        try {
+          const imgObj = await loadImg(report.photoUrl);
+          if (imgObj) {
+            const photoBoxW = 80;
+            const photoBoxH = 58;
+            const photoX = 112;
+            const photoY = currentY + 15;
+
+            // Photo border frame
+            doc.setFillColor(15, 23, 42);
+            doc.roundedRect(photoX, photoY, photoBoxW, photoBoxH, 1.5, 1.5, 'F');
+
+            // Embed image
+            doc.addImage(report.photoUrl, 'JPEG', photoX + 0.5, photoY + 0.5, photoBoxW - 1, photoBoxH - 1);
+            
+            // Photo caption
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(6.5);
+            doc.setTextColor(217, 119, 6);
+            doc.text('✓ Lampiran Foto GPS Lapangan (app by Tisna)', photoX, photoY + photoBoxH + 4);
+          }
+        } catch (imgErr) {
+          console.warn('Could not render report photo to PDF:', imgErr);
+        }
+      }
+
+      currentY += cardH + 5;
+    }
+  }
 
   // --- SIGN-OFF / APPROVAL BLOCK ---
   if (currentY > 230) {
@@ -396,6 +526,7 @@ export async function generateProjectPdfReport(
     currentY = 20;
   }
 
+  currentY += 4;
   doc.setDrawColor(203, 213, 225);
   doc.line(14, currentY, 196, currentY);
   currentY += 6;
@@ -405,7 +536,7 @@ export async function generateProjectPdfReport(
   doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
   doc.text('LEMBAR VERIFIKASI & PERSETUJUAN LAPORAN PROGRES', 14, currentY);
 
-  currentY += 10;
+  currentY += 8;
 
   const colW = 55;
   // Box 1: Owner
@@ -413,24 +544,24 @@ export async function generateProjectPdfReport(
   doc.text('Pemilik Proyek (Owner):', 14, currentY);
   doc.setFont('helvetica', 'normal');
   doc.text(project.client, 14, currentY + 4);
-  doc.line(14, currentY + 22, 14 + colW, currentY + 22);
-  doc.text('Tanggal & Tanda Tangan', 14, currentY + 26);
+  doc.line(14, currentY + 20, 14 + colW, currentY + 20);
+  doc.text('Tanggal & Tanda Tangan', 14, currentY + 24);
 
   // Box 2: Konsultan Supervisi
   doc.setFont('helvetica', 'bold');
   doc.text('Konsultan Pengawas / MK:', 80, currentY);
   doc.setFont('helvetica', 'normal');
   doc.text('Tim Supervisi Lapangan', 80, currentY + 4);
-  doc.line(80, currentY + 22, 80 + colW, currentY + 22);
-  doc.text('Tanggal & Tanda Tangan', 80, currentY + 26);
+  doc.line(80, currentY + 20, 80 + colW, currentY + 20);
+  doc.text('Tanggal & Tanda Tangan', 80, currentY + 24);
 
   // Box 3: Kontraktor
   doc.setFont('helvetica', 'bold');
   doc.text('Kontraktor Pelaksana:', 142, currentY);
   doc.setFont('helvetica', 'normal');
   doc.text(project.contractor || 'Project Manager', 142, currentY + 4);
-  doc.line(142, currentY + 22, 142 + colW, currentY + 22);
-  doc.text('Tanggal & Tanda Tangan', 142, currentY + 26);
+  doc.line(142, currentY + 20, 142 + colW, currentY + 20);
+  doc.text('Tanggal & Tanda Tangan', 142, currentY + 24);
 
   // Add Page Numbers footer to all pages
   const totalPages = doc.getNumberOfPages();
@@ -450,4 +581,158 @@ export async function generateProjectPdfReport(
   // Save the PDF
   const safeFilename = project.name.replace(/[^a-zA-Z0-9_-]/g, '_');
   doc.save(`Laporan_Progres_${safeFilename}_Mg${kpi.currentPeriodNumber}.pdf`);
+}
+
+/**
+ * Generate a dedicated Single-Day / Daily Inspection Sheet PDF with large Photos
+ */
+export async function generateDailyReportPdf(
+  project: Project,
+  dailyReport: DailyReportItem
+): Promise<void> {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const navyColor = [15, 23, 42];
+  const amberColor = [217, 119, 6];
+
+  // Header Banner
+  doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.rect(0, 0, 210, 24, 'F');
+  doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+  doc.rect(0, 24, 210, 2, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('LEMBAR LAPORAN HARIAN & DOKUMENTASI INSPEKSI FISIK', 14, 13);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(`Proyek: ${project.name} (${project.code}) • Tanggal: ${dailyReport.date}`, 14, 19);
+
+  let currentY = 32;
+
+  // Metadata Card
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(14, currentY, 182, 36, 2, 2, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(14, currentY, 182, 36, 2, 2, 'D');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text(`ITEM PEKERJAAN: [${dailyReport.rabItemCode || 'RAB'}] ${dailyReport.rabItemDescription}`, 18, currentY + 8);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text(`Tanggal Laporan : ${dailyReport.date} (Minggu ke-${dailyReport.periodNumber})`, 18, currentY + 16);
+  doc.text(`Pelapor/Inspector: ${dailyReport.reporterName || 'Site Staff'}`, 18, currentY + 22);
+  doc.text(`Lokasi Proyek   : ${project.location}`, 18, currentY + 28);
+
+  doc.text(`Penambahan Volume: ${dailyReport.volumeProgress} unit`, 110, currentY + 16);
+  doc.text(`Penambahan Bobot : +${formatPercent(dailyReport.weightAdded)}`, 110, currentY + 22);
+  doc.text(`Klien / Owner    : ${project.client}`, 110, currentY + 28);
+
+  currentY += 42;
+
+  // Notes Block
+  doc.setFillColor(254, 243, 199);
+  doc.roundedRect(14, currentY, 182, 20, 2, 2, 'F');
+  doc.setDrawColor(252, 211, 77);
+  doc.roundedRect(14, currentY, 182, 20, 2, 2, 'D');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(146, 64, 14);
+  doc.text('CATATAN / KENDALA LAPANGAN:', 18, currentY + 6);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(51, 65, 85);
+  const notes = dailyReport.notes || 'Pekerjaan terlaksana sesuai spesifikasi teknis dan gambar kerja.';
+  doc.text(notes, 18, currentY + 13, { maxWidth: 172 });
+
+  currentY += 26;
+
+  // Photo Section
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text('FOTO DOKUMENTASI INSPEKSI (DENGAN GPS & TIMESTAMP)', 14, currentY);
+
+  currentY += 4;
+
+  if (dailyReport.photoUrl) {
+    try {
+      const imgObj = await loadImg(dailyReport.photoUrl);
+      if (imgObj) {
+        const photoBoxW = 182;
+        const photoBoxH = 120;
+        
+        doc.setFillColor(15, 23, 42);
+        doc.roundedRect(14, currentY, photoBoxW, photoBoxH, 2, 2, 'F');
+        doc.addImage(dailyReport.photoUrl, 'JPEG', 15, currentY + 1, photoBoxW - 2, photoBoxH - 2);
+
+        currentY += photoBoxH + 4;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(amberColor[0], amberColor[1], amberColor[2]);
+        doc.text('✓ Foto Lapangan Autentik dengan GPS & Timestamp Watermark (app by Tisna)', 14, currentY);
+      }
+    } catch (err) {
+      console.warn('Failed to load daily report photo:', err);
+    }
+  } else {
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(14, currentY, 182, 40, 2, 2, 'F');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text('Tidak ada lampiran foto untuk laporan harian ini.', 105, currentY + 22, { align: 'center' });
+    currentY += 45;
+  }
+
+  // Sign-off
+  currentY = 240;
+  doc.setDrawColor(203, 213, 225);
+  doc.line(14, currentY, 196, currentY);
+  currentY += 6;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text('TANDA TANGAN & PERSETUJUAN INSPEKSI:', 14, currentY);
+
+  currentY += 8;
+  const colW = 55;
+
+  doc.setFontSize(8);
+  doc.text('Pelapor / Mandor Lapangan:', 14, currentY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(dailyReport.reporterName || 'Site Staff', 14, currentY + 4);
+  doc.line(14, currentY + 18, 14 + colW, currentY + 18);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Konsultan Pengawas / MK:', 80, currentY);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Tim Supervisi Lapangan', 80, currentY + 4);
+  doc.line(80, currentY + 18, 80 + colW, currentY + 18);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Project Manager / Kontraktor:', 142, currentY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(project.contractor || 'Kontraktor', 142, currentY + 4);
+  doc.line(142, currentY + 18, 142 + colW, currentY + 18);
+
+  // Footer
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text(`Lembar Laporan Harian • ${project.name} • Dicetak: ${new Date().toLocaleString('id-ID')}`, 105, 288, { align: 'center' });
+
+  doc.save(`Laporan_Harian_${dailyReport.date}_${project.code}.pdf`);
 }

@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Project, RabItem } from '../types/project';
 import { parseExcelOrCsvRab, downloadSampleRabTemplate, exportRabToExcel } from '../utils/excelParser';
 import { recalculateRabItems, formatIDR, formatPercent } from '../utils/calculator';
+import { exportRabToCsv } from '../utils/dataExporter';
 import {
   Upload,
   FileSpreadsheet,
@@ -362,9 +363,19 @@ export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRa
             <button
               onClick={() => exportRabToExcel(project.name, activeItems, currentTotalVal)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer border border-slate-200"
+              title="Unduh format spreadsheet Excel .xlsx"
             >
               <Download className="w-4 h-4 text-emerald-600" />
               <span>Export Excel</span>
+            </button>
+
+            <button
+              onClick={() => exportRabToCsv(project)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer border border-slate-200"
+              title="Unduh format file CSV (.csv)"
+            >
+              <Download className="w-4 h-4 text-blue-600" />
+              <span>Export CSV</span>
             </button>
           </div>
         </div>

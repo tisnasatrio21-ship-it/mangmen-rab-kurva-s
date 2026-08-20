@@ -28,18 +28,21 @@ import {
   FileCheck2,
   Printer,
   Sparkles,
+  HardDrive,
 } from 'lucide-react';
 
 interface DashboardProps {
   project: Project;
   onNavigateTab: (tab: 'rab-import' | 'timeline' | 'daily-report') => void;
   onOpenReportModal: () => void;
+  onOpenBackupModal?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
   project,
   onNavigateTab,
   onOpenReportModal,
+  onOpenBackupModal,
 }) => {
   const sPoints = calculateSCurvePoints(project);
   const kpi = getProjectKPI(project);
@@ -122,6 +125,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            {onOpenBackupModal && (
+              <button
+                onClick={onOpenBackupModal}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-800 text-amber-400 font-bold text-xs rounded-xl border border-slate-600 hover:border-amber-400/60 transition-all shadow-md cursor-pointer"
+                title="Backup Data Proyek ke File JSON / CSV"
+              >
+                <HardDrive className="w-4 h-4 text-amber-400" />
+                <span>Backup JSON / CSV</span>
+              </button>
+            )}
+
             <button
               onClick={handleExportPdf}
               disabled={isExportingPdf}

@@ -65,3 +65,16 @@ export interface SPoint {
   deviation: number;          // actualCumulative - plannedCumulative
   isCompletedPeriod: boolean; // whether period has past or current reports
 }
+
+export type DeviceStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AuthorizedDevice {
+  id: string; // e.g. DEV-XXXXXX
+  deviceName: string; // e.g. "Chrome on Android"
+  userAgent?: string;
+  status: DeviceStatus;
+  requestedAt: string; // ISO string
+  approvedAt?: string; // ISO string
+  approvedBy?: string; // e.g. "tisnasatrio21@gmail.com"
+  ipOrInfo?: string;
+}

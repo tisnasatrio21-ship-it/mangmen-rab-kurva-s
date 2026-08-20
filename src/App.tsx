@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Project, RabItem, PlannedPeriodDistribution, DailyReportItem } from './types/project';
+import { Project, RabItem, PlannedPeriodDistribution, DailyReportItem, AuthorizedDevice } from './types/project';
 import { sampleProject } from './data/sampleProject';
 import { Navbar } from './components/Navbar';
 import { NavigationTabs, ActiveTab } from './components/Sidebar';
@@ -8,8 +8,19 @@ import { RabImport } from './components/RabImport';
 import { TimelinePlanner } from './components/TimelinePlanner';
 import { DailyReport } from './components/DailyReport';
 import { ProjectModal } from './components/ProjectModal';
+import { BackupExportModal } from './components/BackupExportModal';
+import { DeviceLockScreen } from './components/DeviceLockScreen';
+import { DeviceManagementModal } from './components/DeviceManagementModal';
 import { generateAutoPlannedDistributions, recalculateRabItems } from './utils/calculator';
 import { useFirebase } from './firebase/FirebaseContext';
+import {
+  getOrCreateDeviceId,
+  registerDeviceInFirestore,
+  subscribeToDeviceStatus,
+  approveDevice,
+  isUserMasterAdmin,
+  ADMIN_EMAIL,
+} from './utils/deviceAuth';
 import {
   HardHat,
   Cloud,
@@ -20,6 +31,9 @@ import {
   AlertCircle,
   UploadCloud,
   Loader2,
+  ShieldCheck,
+  Smartphone,
+  X,
 } from 'lucide-react';
 
 const LOCAL_STORAGE_KEY = 'rab_kurva_s_projects_v1';
@@ -28,6 +42,7 @@ const LOCAL_STORAGE_ACTIVE_ID = 'rab_kurva_s_active_id_v1';
 export default function App() {
   const {
     user,
+    isLoadingAuth,
     cloudProjects,
     syncProjectToCloud,
     deleteProjectFromCloud,
@@ -35,6 +50,89 @@ export default function App() {
     syncStatus,
     signInWithGoogle,
   } = useFirebase();
+
+  // Device Authentication State
+  const [deviceInfo] = useState(() => getOrCreateDeviceId());
+  const [currentDevice, setCurrentDevice] = useState<AuthorizedDevice>(() => ({
+    id: deviceInfo.deviceId,
+    deviceName: deviceInfo.deviceName,
+    status: 'pending',
+    requestedAt: new Date().toISOString(),
+  }));
+  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
+  const [approvalToast, setApprovalToast] = useState<string | null>(null);
+  const [approvalUrlParam, setApprovalUrlParam] = useState<string | null>(null);
+
+  // Register device in Firestore and subscribe to real-time status updates
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    const initDevice = async () => {
+      try {
+        const registered = await registerDeviceInFirestore(deviceInfo.deviceId, deviceInfo.deviceName);
+        setCurrentDevice(registered);
+
+        unsubscribe = subscribeToDeviceStatus(
+          deviceInfo.deviceId,
+          (updatedDev) => {
+            setCurrentDevice(updatedDev);
+          },
+          (err) => {
+            console.warn('Device status realtime listener note:', err);
+          }
+        );
+      } catch (err) {
+        console.warn('Device initialization notice:', err);
+      }
+    };
+
+    initDevice();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [deviceInfo]);
+
+  // Check URL query parameters for 1-click WhatsApp approval link (?approve_device=DEV-XXXXXX)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const approveTarget = urlParams.get('approve_device');
+    if (approveTarget) {
+      setApprovalUrlParam(approveTarget);
+
+      if (isUserMasterAdmin(user?.email)) {
+        approveDevice(approveTarget, user?.email || ADMIN_EMAIL).then(() => {
+          setApprovalToast(`Perangkat ${approveTarget} berhasil DIIZINKAN oleh Pak Tisna!`);
+          window.history.replaceState({}, document.title, window.location.pathname);
+          setApprovalUrlParam(null);
+          setTimeout(() => setApprovalToast(null), 6000);
+        });
+      }
+    }
+  }, [user]);
+
+  // If user is Master Admin (tisnasatrio21@gmail.com), auto-approve this device and any pending WhatsApp links
+  useEffect(() => {
+    if (isUserMasterAdmin(user?.email)) {
+      if (currentDevice.status !== 'approved') {
+        approveDevice(currentDevice.id, user?.email || ADMIN_EMAIL).catch(console.error);
+        setCurrentDevice((prev) => ({
+          ...prev,
+          status: 'approved',
+          approvedBy: user?.email || ADMIN_EMAIL,
+        }));
+      }
+
+      if (approvalUrlParam) {
+        approveDevice(approvalUrlParam, user?.email || ADMIN_EMAIL).then(() => {
+          setApprovalToast(`Perangkat ${approvalUrlParam} berhasil DIIZINKAN oleh Pak Tisna!`);
+          window.history.replaceState({}, document.title, window.location.pathname);
+          setApprovalUrlParam(null);
+          setTimeout(() => setApprovalToast(null), 6000);
+        });
+      }
+    }
+  }, [user, currentDevice.id, currentDevice.status, approvalUrlParam]);
 
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
@@ -61,6 +159,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [cloudBannerDismissed, setCloudBannerDismissed] = useState(false);
 
   // Sync to local storage
@@ -245,6 +344,52 @@ export default function App() {
     }
   };
 
+  // Handle restoring / importing projects from local JSON backup
+  const handleImportProjects = (imported: Project[]) => {
+    if (!imported || imported.length === 0) return;
+
+    setProjects((prev) => {
+      const existingMap = new Map(prev.map((p) => [p.id, p]));
+      imported.forEach((p) => {
+        existingMap.set(p.id, p);
+      });
+      return Array.from(existingMap.values());
+    });
+
+    setActiveProjectId(imported[0].id);
+    setActiveTab('dashboard');
+
+    if (user) {
+      imported.forEach((proj) => {
+        syncProjectToCloud(proj).catch((err) => {
+          console.error('Failed to sync restored project to cloud:', err);
+        });
+      });
+    }
+  };
+
+  // Check if device is authorized:
+  // Allowed if:
+  // 1. User is Master Admin (tisnasatrio21@gmail.com)
+  // 2. Or currentDevice.status is 'approved'
+  const isMasterAdminUser = isUserMasterAdmin(user?.email);
+  const isDeviceAuthorized = isMasterAdminUser || currentDevice.status === 'approved';
+
+  // If device is NOT authorized yet, show the full WhatsApp Device Lock Screen
+  if (!isDeviceAuthorized) {
+    return (
+      <DeviceLockScreen
+        currentDevice={currentDevice}
+        onAdminLogin={signInWithGoogle}
+        isLoadingAuth={isLoadingAuth}
+        onRefreshStatus={async () => {
+          const registered = await registerDeviceInFirestore(deviceInfo.deviceId, deviceInfo.deviceName);
+          setCurrentDevice(registered);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans flex flex-col antialiased">
       {/* Top Fixed Header */}
@@ -253,6 +398,8 @@ export default function App() {
         allProjects={projects}
         onSelectProject={(id) => setActiveProjectId(id)}
         onOpenNewProjectModal={() => setIsProjectModalOpen(true)}
+        onOpenBackupModal={() => setIsBackupModalOpen(true)}
+        onOpenDeviceModal={() => setIsDeviceModalOpen(true)}
         onResetSampleData={handleResetSampleData}
         onManualCloudSync={handleManualCloudSync}
       />
@@ -267,6 +414,48 @@ export default function App() {
 
       {/* Primary Workspace View Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
+        {/* Toast for WhatsApp 1-Click Approval feedback */}
+        {approvalToast && (
+          <div className="p-4 rounded-xl bg-emerald-950 text-emerald-200 border border-emerald-500 shadow-xl flex items-center justify-between text-xs animate-fadeIn">
+            <div className="flex items-center gap-2.5">
+              <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+              <div>
+                <strong className="font-bold text-white text-sm">Persetujuan Perangkat Berhasil!</strong>
+                <p className="text-emerald-300 mt-0.5">{approvalToast}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setApprovalToast(null)}
+              className="p-1 text-emerald-400 hover:text-white rounded cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Notice if opening with approval link but not logged in as Admin */}
+        {approvalUrlParam && !isMasterAdminUser && (
+          <div className="p-4 rounded-xl bg-amber-950/90 text-amber-200 border border-amber-500 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5">
+              <Smartphone className="w-5 h-5 text-amber-400 shrink-0" />
+              <div>
+                <p className="font-bold text-white">
+                  Permintaan Izin Perangkat: <span className="font-mono text-amber-300">{approvalUrlParam}</span>
+                </p>
+                <p className="text-amber-300/80 text-[11px] mt-0.5">
+                  Silakan masuk sebagai Pak Tisna (<code className="text-amber-200 font-bold">{ADMIN_EMAIL}</code>) untuk mengonfirmasi persetujuan perangkat ini.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={signInWithGoogle}
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors shrink-0 cursor-pointer"
+            >
+              Login Pak Tisna
+            </button>
+          </div>
+        )}
+
         {/* Firebase Cloud Sync Banner */}
         {!cloudBannerDismissed && (
           <div
@@ -343,6 +532,7 @@ export default function App() {
             project={currentProject}
             onNavigateTab={(tab) => setActiveTab(tab)}
             onOpenReportModal={() => setActiveTab('daily-report')}
+            onOpenBackupModal={() => setIsBackupModalOpen(true)}
           />
         )}
 
@@ -392,7 +582,23 @@ export default function App() {
         onClose={() => setIsProjectModalOpen(false)}
         onSaveProject={handleSaveNewProject}
       />
+
+      {/* Local JSON / CSV Backup & Restore Modal */}
+      <BackupExportModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        currentProject={currentProject}
+        allProjects={projects}
+        onImportProjects={handleImportProjects}
+      />
+
+      {/* Device Management Modal */}
+      <DeviceManagementModal
+        isOpen={isDeviceModalOpen}
+        onClose={() => setIsDeviceModalOpen(false)}
+        currentDeviceId={currentDevice.id}
+        adminEmail={user?.email || ADMIN_EMAIL}
+      />
     </div>
   );
 }
-

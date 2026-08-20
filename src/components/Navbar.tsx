@@ -20,6 +20,8 @@ import {
   LogOut,
   ChevronDown,
   User as UserIcon,
+  HardDrive,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -27,6 +29,8 @@ interface NavbarProps {
   allProjects: Project[];
   onSelectProject: (id: string) => void;
   onOpenNewProjectModal: () => void;
+  onOpenBackupModal?: () => void;
+  onOpenDeviceModal?: () => void;
   onResetSampleData: () => void;
   onManualCloudSync?: () => void;
 }
@@ -36,6 +40,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   allProjects,
   onSelectProject,
   onOpenNewProjectModal,
+  onOpenBackupModal,
+  onOpenDeviceModal,
   onResetSampleData,
   onManualCloudSync,
 }) => {
@@ -205,6 +211,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
                 <span className="hidden md:inline">Export PDF</span>
               </button>
+
+              {onOpenDeviceModal && (
+                <button
+                  onClick={onOpenDeviceModal}
+                  className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 hover:border-emerald-500/50 transition-colors cursor-pointer shadow-xs"
+                  title="Otorisasi & Keamanan Akses Perangkat (WhatsApp Gate)"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="hidden sm:inline">Perangkat</span>
+                </button>
+              )}
+
+              {onOpenBackupModal && (
+                <button
+                  onClick={onOpenBackupModal}
+                  className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 hover:border-amber-400/50 transition-colors cursor-pointer shadow-xs"
+                  title="Backup & Export Data Proyek ke File JSON / CSV"
+                >
+                  <HardDrive className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">Backup / Export</span>
+                </button>
+              )}
 
               <button
                 onClick={onOpenNewProjectModal}

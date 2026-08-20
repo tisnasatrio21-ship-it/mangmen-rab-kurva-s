@@ -70,12 +70,59 @@
         }
       },
       "required": ["id", "name", "code", "client", "startDate", "endDate", "totalPeriods", "totalContractValue"]
+    },
+    "AuthorizedDevice": {
+      "title": "AuthorizedDevice",
+      "description": "Security record for hardware devices requesting access with WhatsApp confirmation",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique device identifier (e.g., DEV-XXXXX)",
+          "maxLength": 128
+        },
+        "deviceName": {
+          "type": "string",
+          "description": "Device name or browser OS description",
+          "maxLength": 200
+        },
+        "userAgent": {
+          "type": "string",
+          "description": "Browser user agent string",
+          "maxLength": 500
+        },
+        "status": {
+          "type": "string",
+          "description": "Approval status of device",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "requestedAt": {
+          "type": "string",
+          "description": "ISO timestamp of when access was requested",
+          "maxLength": 50
+        },
+        "approvedAt": {
+          "type": "string",
+          "description": "ISO timestamp of approval",
+          "maxLength": 50
+        },
+        "approvedBy": {
+          "type": "string",
+          "description": "Email or identifier of the approving admin",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "deviceName", "status", "requestedAt"]
     }
   },
   "firestore": {
     "/projects/{projectId}": {
       "schema": "Project",
       "description": "Collection of construction projects managed by users"
+    },
+    "/authorized_devices/{deviceId}": {
+      "schema": "AuthorizedDevice",
+      "description": "Collection of registered and authorized devices with approval status"
     }
   }
 }
