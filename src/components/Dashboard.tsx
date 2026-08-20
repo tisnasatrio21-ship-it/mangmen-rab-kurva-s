@@ -30,6 +30,7 @@ import {
   Printer,
   Sparkles,
   HardDrive,
+  LayoutGrid,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -51,6 +52,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [exportSuccessMsg, setExportSuccessMsg] = useState<string | null>(null);
+  const [dashViewMode, setDashViewMode] = useState<'table' | 'cards'>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 1024 ? 'cards' : 'table'
+  );
 
   const dashTableRef = useRef<HTMLDivElement>(null);
 
@@ -526,7 +530,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            {/* View Mode Switcher */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+              <button
+                onClick={() => setDashViewMode('table')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  dashViewMode === 'table'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+                title="Tampilan Tabel Lengkap"
+              >
+                <Table className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Tabel</span>
+              </button>
+              <button
+                onClick={() => setDashViewMode('cards')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  dashViewMode === 'cards'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+                title="Tampilan Kartu Ringkas (Mobile Friendly)"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Kartu</span>
+              </button>
+            </div>
+
             <button
               onClick={handleExportPdf}
               disabled={isExportingPdf}
@@ -551,119 +583,203 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {/* Intuitive Mobile Scroll Banner & Controls */}
-        <div className="flex items-center justify-between bg-amber-50/90 border border-amber-200/90 rounded-xl px-3.5 py-2 text-xs text-amber-950 shadow-xs">
-          <div className="flex items-center gap-2">
-            <MoveHorizontal className="w-4 h-4 text-amber-600 animate-pulse shrink-0" />
-            <span className="font-semibold text-[11px] sm:text-xs">
-              Geser tabel ke kanan/kiri untuk melihat volume realisasi &amp; status penyelesaian
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => scrollDashTable('left')}
-              className="p-1.5 bg-white hover:bg-amber-100 text-amber-900 rounded-lg border border-amber-300 shadow-xs transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-bold"
-              title="Scroll Kiri"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Kiri</span>
-            </button>
-            <button
-              onClick={() => scrollDashTable('right')}
-              className="p-1.5 bg-white hover:bg-amber-100 text-amber-900 rounded-lg border border-amber-300 shadow-xs transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-bold"
-              title="Scroll Kanan"
-            >
-              <span className="hidden sm:inline">Kanan</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+        {dashViewMode === 'cards' ? (
+          /* Mobile Cards View for Dashboard */
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {project.rabItems.map((item, idx) => {
+              const actualVol = itemActualVolMap.get(item.id) || 0;
+              const ratio = Math.min(1, actualVol / (item.volume || 1));
+              const actualWeight = item.weightPercentage * ratio;
+              const percentDone = ratio * 100;
 
-        {/* Dashboard Horizontal Table Container */}
-        <div
-          ref={dashTableRef}
-          className="overflow-x-auto custom-table-scrollbar touch-scroll-x border border-slate-200 rounded-xl shadow-xs"
-        >
-          <table className="w-full text-left text-xs border-collapse min-w-[800px]">
-            <thead className="bg-slate-900 text-slate-200 uppercase font-bold text-[11px] tracking-wider sticky top-0 z-20">
-              <tr>
-                <th className="py-3 px-2 w-9 text-center sticky left-0 bg-slate-900 z-30 border-r border-slate-800">
-                  No
-                </th>
-                <th className="py-3 px-2.5 w-16 sticky left-9 bg-slate-900 z-30 border-r border-slate-800">
-                  Kode
-                </th>
-                <th className="py-3 px-3 min-w-[180px] sm:min-w-[220px] sticky left-[100px] bg-slate-900 z-30 border-r border-slate-700 sticky-col-shadow-right">
-                  Uraian Pekerjaan
-                </th>
-                <th className="py-3 px-3 text-right whitespace-nowrap">Vol RAB</th>
-                <th className="py-3 px-3 text-right whitespace-nowrap">Vol Terlapor</th>
-                <th className="py-3 px-3 text-center whitespace-nowrap">Sat</th>
-                <th className="py-3 px-3 text-right whitespace-nowrap">Bobot RAB %</th>
-                <th className="py-3 px-3 text-right whitespace-nowrap">Bobot Aktual %</th>
-                <th className="py-3 px-3 text-center whitespace-nowrap">Status Field</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-200 text-slate-700 bg-white">
-              {project.rabItems.map((item, idx) => {
-                const actualVol = itemActualVolMap.get(item.id) || 0;
-                const ratio = Math.min(1, actualVol / (item.volume || 1));
-                const actualWeight = item.weightPercentage * ratio;
-                const percentDone = ratio * 100;
-
-                return (
-                  <tr key={item.id} className="hover:bg-amber-50/40 transition-colors group">
-                    <td className="py-2.5 px-2 text-center text-slate-400 font-mono sticky left-0 bg-white group-hover:bg-slate-50 z-10 border-r border-slate-200/60">
-                      {idx + 1}
-                    </td>
-                    <td className="py-2.5 px-2.5 font-semibold text-slate-900 font-mono sticky left-9 bg-white group-hover:bg-slate-50 z-10 border-r border-slate-200/60">
-                      {item.code}
-                    </td>
-                    <td className="py-2.5 px-3 font-semibold text-slate-800 sticky left-[100px] bg-white group-hover:bg-slate-50 z-10 border-r border-slate-300 sticky-col-shadow-right">
-                      <div className="line-clamp-2">{item.description}</div>
-                      <div className="text-[10px] text-slate-400 font-normal">{item.category}</div>
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-medium whitespace-nowrap">{item.volume}</td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-blue-600 whitespace-nowrap">
-                      {actualVol.toFixed(2)}
-                    </td>
-                    <td className="py-2.5 px-3 text-center font-mono text-slate-500 whitespace-nowrap">{item.unit}</td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
-                      {formatPercent(item.weightPercentage)}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-extrabold text-amber-600 bg-amber-50/50 whitespace-nowrap">
-                      {formatPercent(actualWeight)}
-                    </td>
-                    <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                      <span
-                        className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
-                          percentDone >= 100
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            : percentDone > 0
-                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                            : 'bg-slate-100 text-slate-600 border border-slate-200'
-                        }`}
-                      >
-                        {percentDone >= 100 ? (
-                          <>
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Selesai
-                          </>
-                        ) : percentDone > 0 ? (
-                          <>
-                            <Activity className="w-3 h-3 text-amber-600" /> {percentDone.toFixed(1)}%
-                          </>
-                        ) : (
-                          'Belum Mulai'
-                        )}
+              return (
+                <div
+                  key={item.id}
+                  className="p-4 bg-white border border-slate-200 hover:border-amber-400/80 rounded-xl shadow-xs space-y-3 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono text-[11px] font-bold bg-slate-900 text-white px-2 py-0.5 rounded">
+                        {item.code || `#${idx + 1}`}
                       </span>
-                    </td>
+                      <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 truncate max-w-[150px]">
+                        {item.category}
+                      </span>
+                    </div>
+
+                    <span
+                      className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md shrink-0 ${
+                        percentDone >= 100
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : percentDone > 0
+                          ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      {percentDone >= 100 ? (
+                        <>
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Selesai
+                        </>
+                      ) : percentDone > 0 ? (
+                        <>
+                          <Activity className="w-3 h-3 text-amber-600" /> {percentDone.toFixed(1)}%
+                        </>
+                      ) : (
+                        'Belum Mulai'
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="font-semibold text-slate-800 text-xs sm:text-sm leading-snug">
+                    {item.description}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-lg text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase">Volume Target vs Aktual</span>
+                      <div className="font-mono text-slate-800 text-xs">
+                        <strong className="text-blue-600">{actualVol.toFixed(2)}</strong> / {item.volume} {item.unit}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase">Bobot Aktual / Target</span>
+                      <div className="font-mono text-xs">
+                        <strong className="text-amber-700">{formatPercent(actualWeight)}</strong> / {formatPercent(item.weightPercentage)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Visual Progress Bar */}
+                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        percentDone >= 100 ? 'bg-emerald-500' : percentDone > 0 ? 'bg-amber-500' : 'bg-slate-300'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, percentDone))}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* Table View for Dashboard */
+          <>
+            {/* Intuitive Mobile Scroll Banner & Controls */}
+            <div className="flex items-center justify-between bg-amber-50/90 border border-amber-200/90 rounded-xl px-3.5 py-2 text-xs text-amber-950 shadow-xs">
+              <div className="flex items-center gap-2">
+                <MoveHorizontal className="w-4 h-4 text-amber-600 animate-pulse shrink-0" />
+                <span className="font-semibold text-[11px] sm:text-xs">
+                  Geser tabel ke samping untuk melihat volume realisasi &amp; status penyelesaian
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => scrollDashTable('left')}
+                  className="p-1.5 bg-white hover:bg-amber-100 text-amber-900 rounded-lg border border-amber-300 shadow-xs transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+                  title="Scroll Kiri"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Kiri</span>
+                </button>
+                <button
+                  onClick={() => scrollDashTable('right')}
+                  className="p-1.5 bg-white hover:bg-amber-100 text-amber-900 rounded-lg border border-amber-300 shadow-xs transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+                  title="Scroll Kanan"
+                >
+                  <span className="hidden sm:inline">Kanan</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Dashboard Horizontal Table Container */}
+            <div
+              ref={dashTableRef}
+              className="w-full overflow-x-auto custom-table-scrollbar touch-scroll-x border border-slate-200 rounded-xl shadow-xs"
+            >
+              <table className="w-full text-left text-xs border-collapse min-w-[700px] lg:min-w-[800px]">
+                <thead className="bg-slate-900 text-slate-200 uppercase font-bold text-[11px] tracking-wider sticky top-0 z-20">
+                  <tr>
+                    <th className="py-3 px-2 sm:px-3 w-10 text-center bg-slate-900 border-r border-slate-800">
+                      No
+                    </th>
+                    <th className="py-3 px-2 sm:px-3 w-16 sm:w-20 bg-slate-900 border-r border-slate-800">
+                      Kode
+                    </th>
+                    <th className="py-3 px-3 sm:px-4 min-w-[180px] sm:min-w-[200px] bg-slate-900 border-r border-slate-700">
+                      Uraian Pekerjaan
+                    </th>
+                    <th className="py-3 px-2.5 sm:px-3 text-right whitespace-nowrap">Vol RAB</th>
+                    <th className="py-3 px-2.5 sm:px-3 text-right whitespace-nowrap">Vol Terlapor</th>
+                    <th className="py-3 px-2 sm:px-3 text-center whitespace-nowrap">Sat</th>
+                    <th className="py-3 px-2.5 sm:px-3 text-right whitespace-nowrap">Bobot RAB %</th>
+                    <th className="py-3 px-2.5 sm:px-3 text-right whitespace-nowrap">Bobot Aktual %</th>
+                    <th className="py-3 px-2.5 sm:px-3 text-center whitespace-nowrap">Status Field</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+
+                <tbody className="divide-y divide-slate-200 text-slate-700 bg-white">
+                  {project.rabItems.map((item, idx) => {
+                    const actualVol = itemActualVolMap.get(item.id) || 0;
+                    const ratio = Math.min(1, actualVol / (item.volume || 1));
+                    const actualWeight = item.weightPercentage * ratio;
+                    const percentDone = ratio * 100;
+
+                    return (
+                      <tr key={item.id} className="hover:bg-amber-50/40 transition-colors group">
+                        <td className="py-2.5 px-2 sm:px-3 text-center text-slate-400 font-mono bg-white group-hover:bg-slate-50 border-r border-slate-200/60">
+                          {idx + 1}
+                        </td>
+                        <td className="py-2.5 px-2 sm:px-3 font-semibold text-slate-900 font-mono bg-white group-hover:bg-slate-50 border-r border-slate-200/60 text-[11px] sm:text-xs">
+                          {item.code}
+                        </td>
+                        <td className="py-2.5 px-3 sm:px-4 font-semibold text-slate-800 bg-white group-hover:bg-slate-50 border-r border-slate-200">
+                          <div className="line-clamp-2">{item.description}</div>
+                          <div className="text-[10px] text-slate-400 font-normal">{item.category}</div>
+                        </td>
+                        <td className="py-2.5 px-2.5 sm:px-3 text-right font-mono font-medium whitespace-nowrap">{item.volume}</td>
+                        <td className="py-2.5 px-2.5 sm:px-3 text-right font-mono font-bold text-blue-600 whitespace-nowrap">
+                          {actualVol.toFixed(2)}
+                        </td>
+                        <td className="py-2.5 px-2 sm:px-3 text-center font-mono text-slate-500 whitespace-nowrap">{item.unit}</td>
+                        <td className="py-2.5 px-2.5 sm:px-3 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
+                          {formatPercent(item.weightPercentage)}
+                        </td>
+                        <td className="py-2.5 px-2.5 sm:px-3 text-right font-mono font-extrabold text-amber-600 bg-amber-50/50 whitespace-nowrap">
+                          {formatPercent(actualWeight)}
+                        </td>
+                        <td className="py-2.5 px-2.5 sm:px-3 text-center whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md ${
+                              percentDone >= 100
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : percentDone > 0
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            {percentDone >= 100 ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Selesai
+                              </>
+                            ) : percentDone > 0 ? (
+                              <>
+                                <Activity className="w-3 h-3 text-amber-600" /> {percentDone.toFixed(1)}%
+                              </>
+                            ) : (
+                              'Belum Mulai'
+                            )}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
