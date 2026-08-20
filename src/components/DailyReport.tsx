@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Project, DailyReportItem, RabItem } from '../types/project';
 import { getPeriodNumberForDate, formatPercent, formatIDR } from '../utils/calculator';
+import { CameraCaptureModal } from './CameraCaptureModal';
 import {
   ClipboardList,
   PlusCircle,
@@ -17,6 +18,9 @@ import {
   Building,
   Image as ImageIcon,
   Sparkles,
+  MapPin,
+  Clock,
+  Upload,
 } from 'lucide-react';
 
 interface DailyReportProps {
@@ -31,6 +35,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   onDeleteDailyReport,
 }) => {
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
   const [selectedPhotoModal, setSelectedPhotoModal] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterWeek, setFilterWeek] = useState<string>('all');
@@ -309,56 +314,72 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                   placeholder="Ir. Budi / Mandor Utama"
                 />
 
-                {/* Photo Upload Section */}
-                <label className="block font-semibold text-slate-300 mb-1">Dokumentasi Foto Lapangan</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handlePhotoFileUpload}
-                    className="hidden"
-                    id="photo-file-input"
-                  />
-                  <label
-                    htmlFor="photo-file-input"
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-300 cursor-pointer font-medium flex items-center gap-1.5"
-                  >
-                    <Camera className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Upload Foto</span>
-                  </label>
-                  <span className="text-[10px] text-slate-400">Atau pilih contoh foto cepat:</span>
-                </div>
+                {/* Upgraded GPS Timestamp Camera & Photo Upload Section */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-semibold text-slate-300">
+                      Dokumentasi Foto Lapangan
+                    </label>
+                    <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      GPS + Waktu + Watermark Tisna
+                    </span>
+                  </div>
 
-                {/* Sample Photo Pickers */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pt-2 scrollbar-none">
-                  {samplePhotos.map((sp, idx) => (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Main Camera GPS Button */}
                     <button
-                      key={idx}
                       type="button"
-                      onClick={() => setPhotoUrlInput(sp.url)}
-                      className={`relative w-12 h-10 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
-                        photoUrlInput === sp.url ? 'border-amber-400 scale-105 shadow-md' : 'border-slate-700 opacity-70 hover:opacity-100'
-                      }`}
-                      title={sp.label}
+                      onClick={() => setIsCameraModalOpen(true)}
+                      className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2 active:scale-95"
                     >
-                      <img src={sp.url} alt={sp.label} className="w-full h-full object-cover" />
+                      <Camera className="w-4 h-4 text-slate-950" />
+                      <span>Buka Kamera GPS / Upload</span>
                     </button>
-                  ))}
+
+                    <span className="text-[11px] text-slate-400">Atau contoh cepat:</span>
+                  </div>
+
+                  {/* Sample Photo Pickers */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pt-1 scrollbar-none">
+                    {samplePhotos.map((sp, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setPhotoUrlInput(sp.url)}
+                        className={`relative w-12 h-10 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
+                          photoUrlInput === sp.url
+                            ? 'border-amber-400 scale-105 shadow-md'
+                            : 'border-slate-700 opacity-70 hover:opacity-100'
+                        }`}
+                        title={sp.label}
+                      >
+                        <img src={sp.url} alt={sp.label} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
 
             {/* Selected Photo Preview */}
             {photoUrlInput && (
-              <div className="relative rounded-xl overflow-hidden border border-slate-700 max-h-40">
-                <img src={photoUrlInput} alt="Preview Foto Lapangan" className="w-full h-40 object-cover" />
+              <div className="relative rounded-xl overflow-hidden border border-amber-500/40 max-h-56 bg-slate-950 p-1 flex items-center justify-center">
+                <img
+                  src={photoUrlInput}
+                  alt="Preview Foto Lapangan"
+                  className="w-full max-h-52 object-contain rounded-lg"
+                />
                 <button
                   type="button"
                   onClick={() => setPhotoUrlInput('')}
-                  className="absolute top-2 right-2 bg-black/70 text-white p-1 rounded-full hover:bg-rose-600"
+                  className="absolute top-3 right-3 bg-black/80 text-white p-1.5 rounded-full hover:bg-rose-600 shadow-md cursor-pointer transition-colors"
+                  title="Hapus foto"
                 >
                   <X className="w-4 h-4" />
                 </button>
+                <div className="absolute bottom-3 left-3 bg-slate-900/90 text-amber-300 text-[10px] font-bold px-2.5 py-1 rounded-lg border border-amber-500/40 shadow">
+                  ✓ Foto Terlampir dengan Watermark &amp; GPS
+                </div>
               </div>
             )}
 
@@ -532,6 +553,23 @@ export const DailyReport: React.FC<DailyReportProps> = ({
           </div>
         </div>
       )}
+
+      {/* GPS Timestamp Camera Modal */}
+      <CameraCaptureModal
+        isOpen={isCameraModalOpen}
+        onClose={() => setIsCameraModalOpen(false)}
+        onPhotoCaptured={(dataUrl) => {
+          setPhotoUrlInput(dataUrl);
+        }}
+        projectName={project.name}
+        itemDescription={
+          selectedItem
+            ? `[${selectedItem.code}] ${selectedItem.description}`
+            : 'Pekerjaan Lapangan'
+        }
+        locationName={project.location || 'Site Lapangan'}
+        reporterName={reporterInput || 'Site Inspector'}
+      />
     </div>
   );
 };
