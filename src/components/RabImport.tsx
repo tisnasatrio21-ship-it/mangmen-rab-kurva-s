@@ -3,6 +3,7 @@ import { Project, RabItem } from '../types/project';
 import { parseExcelOrCsvRab, downloadSampleRabTemplate, exportRabToExcel } from '../utils/excelParser';
 import { recalculateRabItems, formatIDR, formatPercent } from '../utils/calculator';
 import { exportRabToCsv } from '../utils/dataExporter';
+import { useLanguage } from '../i18n/LanguageContext';
 import {
   Upload,
   FileSpreadsheet,
@@ -29,6 +30,7 @@ interface RabImportProps {
 }
 
 export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRab }) => {
+  const { t, language } = useLanguage();
   const [rabItems, setRabItems] = useState<RabItem[]>(project.rabItems || []);
   const [previewItems, setPreviewItems] = useState<RabItem[] | null>(null);
   const [isUploading, setIsUploading] = useState(false);

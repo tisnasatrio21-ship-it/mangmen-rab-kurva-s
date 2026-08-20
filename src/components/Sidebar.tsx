@@ -1,5 +1,6 @@
 import React from 'react';
-import { LayoutDashboard, FileSpreadsheet, CalendarRange, ClipboardList, Layers } from 'lucide-react';
+import { LayoutDashboard, FileSpreadsheet, CalendarRange, ClipboardList } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
 
 export type ActiveTab = 'dashboard' | 'rab-import' | 'timeline' | 'daily-report';
 
@@ -16,33 +17,35 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
   dailyReportsCount,
   rabItemsCount,
 }) => {
+  const { t, language } = useLanguage();
+
   const tabs = [
     {
       id: 'dashboard' as ActiveTab,
-      label: 'Dashboard & Kurva S',
+      label: t.tabDashboard,
       icon: LayoutDashboard,
       badge: null,
       description: 'Grafik Kurva S & Status Deviasi',
     },
     {
       id: 'rab-import' as ActiveTab,
-      label: 'Impor & Master RAB',
+      label: t.tabRab,
       icon: FileSpreadsheet,
-      badge: rabItemsCount > 0 ? `${rabItemsCount} Item` : null,
+      badge: rabItemsCount > 0 ? `${rabItemsCount} ${language === 'id' ? 'Item' : 'Items'}` : null,
       description: 'Upload Excel/CSV & Master Pekerjaan',
     },
     {
       id: 'timeline' as ActiveTab,
-      label: 'Timeline & Jadwal Rencana',
+      label: t.tabTimeline,
       icon: CalendarRange,
       badge: null,
       description: 'Distribusi Bobot & Kurva Rencana',
     },
     {
       id: 'daily-report' as ActiveTab,
-      label: 'Laporan Harian & Aktual',
+      label: t.tabDailyReport,
       icon: ClipboardList,
-      badge: dailyReportsCount > 0 ? `${dailyReportsCount} Log` : null,
+      badge: dailyReportsCount > 0 ? `${dailyReportsCount} ${language === 'id' ? 'Log' : 'Logs'}` : null,
       description: 'Input Progres & Riwayat Laporan',
     },
   ];

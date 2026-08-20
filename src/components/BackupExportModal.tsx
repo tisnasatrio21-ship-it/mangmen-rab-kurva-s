@@ -24,6 +24,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { formatIDR } from '../utils/calculator';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface BackupExportModalProps {
   isOpen: boolean;
@@ -40,6 +41,7 @@ export const BackupExportModal: React.FC<BackupExportModalProps> = ({
   allProjects,
   onImportProjects,
 }) => {
+  const { t, language } = useLanguage();
   const [activeTab, setActiveTab] = useState<'export' | 'restore'>('export');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

@@ -28,6 +28,7 @@ import {
   ADMIN_EMAIL,
   generateWhatsAppApprovalLink,
 } from '../utils/deviceAuth';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface DeviceManagementModalProps {
   isOpen: boolean;
@@ -42,6 +43,7 @@ export const DeviceManagementModal: React.FC<DeviceManagementModalProps> = ({
   currentDeviceId,
   adminEmail,
 }) => {
+  const { t, language } = useLanguage();
   const [devices, setDevices] = useState<AuthorizedDevice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');

@@ -13,6 +13,7 @@ import { DeviceLockScreen } from './components/DeviceLockScreen';
 import { DeviceManagementModal } from './components/DeviceManagementModal';
 import { generateAutoPlannedDistributions, recalculateRabItems } from './utils/calculator';
 import { useFirebase } from './firebase/FirebaseContext';
+import { useLanguage } from './i18n/LanguageContext';
 import {
   getOrCreateDeviceId,
   registerDeviceInFirestore,
@@ -50,6 +51,8 @@ export default function App() {
     syncStatus,
     signInWithGoogle,
   } = useFirebase();
+
+  const { t, language } = useLanguage();
 
   // Device Authentication State
   const [deviceInfo] = useState(() => getOrCreateDeviceId());

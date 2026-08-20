@@ -4,6 +4,7 @@ import { getPeriodNumberForDate, formatPercent, formatIDR } from '../utils/calcu
 import { CameraCaptureModal } from './CameraCaptureModal';
 import { generateProjectPdfReport, generateDailyReportPdf } from '../utils/pdfExporter';
 import { exportDailyReportsToCsv } from '../utils/dataExporter';
+import { useLanguage } from '../i18n/LanguageContext';
 import {
   ClipboardList,
   PlusCircle,
@@ -38,6 +39,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   onAddDailyReport,
   onDeleteDailyReport,
 }) => {
+  const { t, language } = useLanguage();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
   const [selectedPhotoModal, setSelectedPhotoModal] = useState<string | null>(null);

@@ -3,6 +3,7 @@ import { Project } from '../types/project';
 import { formatIDR } from '../utils/calculator';
 import { generateProjectPdfReport } from '../utils/pdfExporter';
 import { useFirebase } from '../firebase/FirebaseContext';
+import { useLanguage } from '../i18n/LanguageContext';
 import {
   HardHat,
   Building2,
@@ -22,6 +23,7 @@ import {
   User as UserIcon,
   HardDrive,
   ShieldCheck,
+  Languages,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -47,6 +49,11 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [isExporting, setIsExporting] = useState(false);
   const { user, isLoadingAuth, syncStatus, signInWithGoogle, logout } = useFirebase();
+  const { language, setLanguage, t } = useLanguage();
+
+  const toggleLanguage = () => {
+    setLanguage(language === 'id' ? 'en' : 'id');
+  };
 
   const handleExportPdf = async () => {
     try {
@@ -73,24 +80,24 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white">RAB & KURVA S</span>
+                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white">{t.appTitle}</span>
                 <span className="text-[9px] sm:text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 sm:px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Proyek
+                  Pro
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
-                Sistem Manajemen Biaya &amp; Progres Konstruksi
+                {t.appSubtitle}
               </p>
             </div>
           </div>
 
           {/* Center/Right Actions */}
-          <div className="flex items-center gap-1.5 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2.5">
             {/* Desktop Project Switcher Selector */}
             <div className="hidden xl:flex items-center gap-2 bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-slate-300">
               <Building2 className="w-4 h-4 text-amber-400 shrink-0" />
               <div className="flex flex-col">
-                <span className="text-[10px] text-slate-400 font-medium">Proyek Aktif:</span>
+                <span className="text-[10px] text-slate-400 font-medium">{t.activeProject}:</span>
                 <div className="relative flex items-center">
                   <select
                     id="desktop-project-select"
@@ -109,6 +116,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             </div>
 
+            {/* Language Selector Switcher */}
+            <button
+              onClick={toggleLanguage}
+              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 hover:border-amber-400/50 transition-all cursor-pointer shadow-xs"
+              title={language === 'id' ? 'Switch to English' : 'Ganti ke Bahasa Indonesia'}
+            >
+              <Languages className="w-3.5 h-3.5 text-amber-400" />
+              <span className="font-mono text-xs">{language === 'id' ? 'ID 🇮🇩' : 'EN 🇬🇧'}</span>
+            </button>
+
             {/* Firebase Cloud Sync Status Badge */}
             <div className="hidden sm:flex items-center">
               {user ? (
@@ -120,30 +137,30 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {syncStatus === 'syncing' ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                      <span>Syncing...</span>
+                      <span>{t.cloudSyncing}</span>
                     </>
                   ) : (
                     <>
                       <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Firebase Connected</span>
+                      <span>{t.cloudSynced}</span>
                     </>
                   )}
                 </button>
               ) : (
                 <span className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 border border-slate-700 text-slate-400 text-[11px] font-medium rounded-lg">
                   <CloudOff className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Mode Lokal</span>
+                  <span>Mode Offline</span>
                 </span>
               )}
             </div>
 
             {/* Quick Action Buttons */}
             <div className="flex items-center gap-1.5 sm:gap-2">
-              {/* Google Login / User Profile - Always clearly visible */}
+              {/* Google Login / User Profile */}
               {isLoadingAuth ? (
                 <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 rounded-xl text-slate-400 text-xs">
                   <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-                  <span className="hidden sm:inline">Memuat...</span>
+                  <span className="hidden sm:inline">{t.loading}</span>
                 </div>
               ) : user ? (
                 <div className="flex items-center gap-1.5 sm:gap-2 pl-1 sm:pl-2 sm:border-l border-slate-700/80">
@@ -157,7 +174,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     ) : (
                       <Cloud className="w-3.5 h-3.5 text-emerald-400" />
                     )}
-                    <span className="hidden md:inline">Tersinkron</span>
+                    <span className="hidden md:inline">{t.cloudSynced}</span>
                   </button>
 
                   <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 rounded-xl px-2 py-1">
@@ -180,7 +197,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <button
                       onClick={logout}
                       className="p-1 hover:bg-rose-900/40 text-slate-400 hover:text-rose-300 rounded-md transition-colors cursor-pointer ml-0.5"
-                      title="Keluar (Logout)"
+                      title={t.logout}
                     >
                       <LogOut className="w-3.5 h-3.5" />
                     </button>
@@ -193,7 +210,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Masuk dengan Google untuk mengaktifkan Cloud Sync Firebase antar perangkat"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span className="hidden xs:inline">Login Cloud</span>
+                  <span className="hidden xs:inline">{t.loginGoogle}</span>
                   <span className="xs:hidden">Login</span>
                 </button>
               )}
@@ -202,14 +219,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={handleExportPdf}
                 disabled={isExporting}
                 className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
-                title="Export Laporan Dashboard Ke PDF"
+                title={t.exportPdf}
               >
                 {isExporting ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
                 ) : (
                   <Download className="w-3.5 h-3.5 text-amber-400" />
                 )}
-                <span className="hidden md:inline">Export PDF</span>
+                <span className="hidden md:inline">{t.exportPdf}</span>
               </button>
 
               {onOpenDeviceModal && (
@@ -219,7 +236,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Otorisasi & Keamanan Akses Perangkat (WhatsApp Gate)"
                 >
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden sm:inline">Perangkat</span>
+                  <span className="hidden sm:inline">{t.devices}</span>
                 </button>
               )}
 
@@ -230,43 +247,43 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Backup & Export Data Proyek ke File JSON / CSV"
                 >
                   <HardDrive className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="hidden sm:inline">Backup / Export</span>
+                  <span className="hidden sm:inline">{t.backupExport}</span>
                 </button>
               )}
 
               <button
                 onClick={onOpenNewProjectModal}
                 className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors shadow-sm cursor-pointer"
-                title="Buat Proyek Baru"
+                title={t.newProject}
               >
                 <Plus className="w-4 h-4" />
-                <span className="hidden sm:inline">Proyek Baru</span>
+                <span className="hidden sm:inline">{t.newProject}</span>
               </button>
 
               <button
                 onClick={onResetSampleData}
-                className="hidden lg:flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700 cursor-pointer"
-                title="Reset ke Data Contoh Proyek"
+                className="hidden lg:flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 transition-colors border border-slate-700 cursor-pointer"
+                title={t.resetSample}
               >
                 <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden xl:inline">Reset Demo</span>
+                <span className="hidden xl:inline">{t.resetSample}</span>
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Sub-header Project Switcher & Summary banner (Fully interactive on Mobile & Desktop) */}
+      {/* Sub-header Project Switcher & Summary banner */}
       <div className="bg-slate-950/90 border-t border-slate-800/90 py-2.5 px-3 sm:px-6 text-xs text-slate-300">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-y-2 gap-x-4">
           
-          {/* Active Project Dropdown Switcher - Prominently interactive on HP/Mobile */}
+          {/* Active Project Dropdown Switcher */}
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <div className="relative flex items-center bg-slate-900 hover:bg-slate-850 border-2 border-amber-500/60 hover:border-amber-400 rounded-xl px-2.5 py-1.5 text-xs text-white shadow-md shadow-amber-500/10 transition-all w-full sm:w-auto min-w-[220px]">
               <FolderKanban className="w-4 h-4 text-amber-400 shrink-0 mr-1.5" />
               <div className="flex flex-col flex-1 min-w-0 pr-6">
                 <span className="text-[9px] font-extrabold text-amber-400 uppercase tracking-wider">
-                  Proyek Aktif (Klik untuk Ganti):
+                  {t.activeProject}:
                 </span>
                 <select
                   id="project-switcher-mobile-header"
@@ -306,10 +323,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center justify-between sm:justify-end gap-3 text-xs w-full sm:w-auto pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-800/60">
             <div className="flex items-center gap-1.5 text-slate-300">
               <Calendar className="w-3.5 h-3.5 text-blue-400" />
-              <span>Durasi: <strong className="text-white">{currentProject.totalPeriods} Minggu</strong></span>
+              <span>{t.duration}: <strong className="text-white">{currentProject.totalPeriods} {language === 'id' ? 'Minggu' : 'Weeks'}</strong></span>
             </div>
             <div className="bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-lg">
-              <span className="text-slate-400 text-[11px]">Nilai Kontrak: </span>
+              <span className="text-slate-400 text-[11px]">{t.contractValue}: </span>
               <strong className="text-amber-400 font-bold">{formatIDR(currentProject.totalContractValue)}</strong>
             </div>
           </div>

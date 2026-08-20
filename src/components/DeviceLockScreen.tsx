@@ -14,6 +14,7 @@ import {
   Sparkles,
   Loader2,
   RefreshCw,
+  Languages,
 } from 'lucide-react';
 import { AuthorizedDevice } from '../types/project';
 import {
@@ -21,6 +22,7 @@ import {
   ADMIN_EMAIL,
   generateWhatsAppApprovalLink,
 } from '../utils/deviceAuth';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface DeviceLockScreenProps {
   currentDevice: AuthorizedDevice;
@@ -37,6 +39,11 @@ export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const { language, setLanguage, t } = useLanguage();
+
+  const toggleLanguage = () => {
+    setLanguage(language === 'id' ? 'en' : 'id');
+  };
 
   const waLink = generateWhatsAppApprovalLink({
     deviceId: currentDevice.id,
@@ -66,15 +73,27 @@ export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
           </div>
           <div>
             <h1 className="font-extrabold text-xs text-white uppercase tracking-wider">
-              RAB &amp; Kurva S Proyek
+              {t.appTitle}
             </h1>
             <p className="text-[10px] text-slate-400">Security Gate &amp; Access Control</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-[10px] text-amber-400 font-mono">
-          <Lock className="w-3 h-3" />
-          <span>LOCKED</span>
+        <div className="flex items-center gap-2">
+          {/* Language Switcher */}
+          <button
+            onClick={toggleLanguage}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] text-slate-300 font-bold cursor-pointer"
+            title="Ganti Bahasa / Change Language"
+          >
+            <Languages className="w-3 h-3 text-amber-400" />
+            <span>{language === 'id' ? 'ID 🇮🇩' : 'EN 🇬🇧'}</span>
+          </button>
+
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-[10px] text-amber-400 font-mono">
+            <Lock className="w-3 h-3" />
+            <span>LOCKED</span>
+          </div>
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Project } from '../types/project';
 import { Building2, X, Plus, Calendar, MapPin, HardHat, DollarSign } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface ProjectModalProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   onSaveProject,
   initialProject,
 }) => {
+  const { t, language } = useLanguage();
   if (!isOpen) return null;
 
   const [form, setForm] = useState({

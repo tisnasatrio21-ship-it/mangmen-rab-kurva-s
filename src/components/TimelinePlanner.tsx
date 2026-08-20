@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Project, PlannedPeriodDistribution, RabItem } from '../types/project';
 import { generateAutoPlannedDistributions, calculateSCurvePoints, formatPercent, getPeriodDateRange } from '../utils/calculator';
+import { useLanguage } from '../i18n/LanguageContext';
 import {
   CalendarRange,
   Wand2,
@@ -27,6 +28,7 @@ interface TimelinePlannerProps {
 }
 
 export const TimelinePlanner: React.FC<TimelinePlannerProps> = ({ project, onUpdateTimeline }) => {
+  const { t, language } = useLanguage();
   const [startDate, setStartDate] = useState(project.startDate || '2026-06-01');
   const [totalPeriods, setTotalPeriods] = useState(project.totalPeriods || 12);
   const [distributions, setDistributions] = useState<PlannedPeriodDistribution[]>(

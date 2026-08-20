@@ -3,6 +3,7 @@ import { Project } from '../types/project';
 import { calculateSCurvePoints, getProjectKPI, formatPercent, formatIDR } from '../utils/calculator';
 import { SCurveChart } from './SCurveChart';
 import { generateProjectPdfReport } from '../utils/pdfExporter';
+import { useLanguage } from '../i18n/LanguageContext';
 import {
   TrendingUp,
   AlertTriangle,
@@ -44,6 +45,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenReportModal,
   onOpenBackupModal,
 }) => {
+  const { t, language } = useLanguage();
   const sPoints = calculateSCurvePoints(project);
   const kpi = getProjectKPI(project);
 
@@ -66,11 +68,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await generateProjectPdfReport(project, {
         chartElementId: 's-curve-chart-container',
       });
-      setExportSuccessMsg('Laporan PDF berhasil diunduh!');
+      setExportSuccessMsg(language === 'id' ? 'Laporan PDF berhasil diunduh!' : 'PDF Report downloaded successfully!');
       setTimeout(() => setExportSuccessMsg(null), 4000);
     } catch (err) {
       console.error('Failed to export PDF:', err);
-      alert('Gagal mengunduh PDF. Silakan coba kembali.');
+      alert(language === 'id' ? 'Gagal mengunduh PDF. Silakan coba kembali.' : 'Failed to export PDF. Please try again.');
     } finally {
       setIsExportingPdf(false);
     }
