@@ -26,14 +26,19 @@ import {
   Table as TableIcon,
   Tag,
   Hash,
+  Sparkles,
+  Camera,
+  Loader2,
+  FileCode,
 } from 'lucide-react';
 
 interface RabImportProps {
   project: Project;
   onUpdateProjectRab: (updatedItems: RabItem[], totalContractValue: number) => void;
+  onOpenAiAudit?: () => void;
 }
 
-export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRab }) => {
+export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRab, onOpenAiAudit }) => {
   const { t, language } = useLanguage();
   const [rabItems, setRabItems] = useState<RabItem[]>(project.rabItems || []);
   const [previewItems, setPreviewItems] = useState<RabItem[] | null>(null);
@@ -45,6 +50,15 @@ export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRa
   const [viewMode, setViewMode] = useState<'table' | 'cards'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 1024 ? 'cards' : 'table'
   );
+
+  // AI OCR / Text Parse Modal State
+  const [isAiScanOpen, setIsAiScanOpen] = useState(false);
+  const [aiScanTab, setAiScanTab] = useState<'image' | 'text'>('image');
+  const [aiScanText, setAiScanText] = useState('');
+  const [aiScanImageBase64, setAiScanImageBase64] = useState<string | null>(null);
+  const [aiScanImageMime, setAiScanImageMime] = useState<string | null>(null);
+  const [isParsingAi, setIsParsingAi] = useState(false);
+  const [aiParseError, setAiParseError] = useState<string | null>(null);
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
@@ -113,6 +127,88 @@ export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRa
     } finally {
       setIsUploading(false);
       e.target.value = '';
+    }
+  };
+
+  // Handle AI File/Image Selection
+  const handleAiImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setAiParseError('Harap pilih file gambar (JPG, PNG, WebP).');
+      return;
+    }
+
+    setAiParseError(null);
+    setAiScanImageMime(file.type);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64Data = result.split(',')[1];
+      setAiScanImageBase64(base64Data);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Run AI RAB Extraction
+  const handleRunAiExtraction = async () => {
+    setIsParsingAi(true);
+    setAiParseError(null);
+
+    try {
+      if (aiScanTab === 'image' && !aiScanImageBase64) {
+        throw new Error('Harap pilih foto atau tangkapan layar dokumen RAB terlebih dahulu.');
+      }
+      if (aiScanTab === 'text' && !aiScanText.trim()) {
+        throw new Error('Harap masukkan teks mentah atau tabel BQ/RAB terlebih dahulu.');
+      }
+
+      const payload =
+        aiScanTab === 'image'
+          ? { imageBase64: aiScanImageBase64, mimeType: aiScanImageMime }
+          : { rawText: aiScanText };
+
+      const res = await fetch('/api/gemini/parse-rab', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.error || 'Gagal mengekstraksi dokumen RAB dengan AI.');
+      }
+
+      const data = await res.json();
+      if (!data.items || data.items.length === 0) {
+        throw new Error('AI tidak menemukan data baris pekerjaan valid pada dokumen.');
+      }
+
+      const mapped: RabItem[] = data.items.map((it: any, idx: number) => ({
+        id: `rab-ai-${Date.now()}-${idx}`,
+        code: it.code || `${idx + 1}`,
+        category: it.category || 'Pekerjaan Utama',
+        description: it.description || `Item Pekerjaan ${idx + 1}`,
+        volume: Number(it.volume) || 1,
+        unit: it.unit || 'ls',
+        unitPrice: Number(it.unitPrice) || 0,
+        totalPrice: (Number(it.volume) || 1) * (Number(it.unitPrice) || 0),
+        weightPercentage: 0,
+      }));
+
+      const { items: recalculated } = recalculateRabItems(mapped);
+      setPreviewItems(recalculated);
+      setIsAiScanOpen(false);
+      setSuccessMessage(
+        `✨ Berhasil mengekstrak ${recalculated.length} item RAB menggunakan Gemini AI Vision. Periksa pratinjau dan simpan.`
+      );
+    } catch (err: any) {
+      console.error(err);
+      setAiParseError(err.message || 'Terjadi kesalahan saat memproses data dengan AI.');
+    } finally {
+      setIsParsingAi(false);
     }
   };
 
@@ -246,13 +342,35 @@ export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRa
             </p>
           </div>
 
-          <button
-            onClick={downloadSampleRabTemplate}
-            className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer border border-slate-200 shrink-0"
-          >
-            <Download className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Download Template Excel RAB</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsAiScanOpen(true)}
+              className="flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 rounded-xl transition-all cursor-pointer shadow-xs shrink-0"
+              title="Ekstraksi dokumen RAB dari foto atau teks menggunakan Gemini 3.7 Vision"
+            >
+              <Sparkles className="w-4 h-4 text-slate-950 shrink-0" />
+              <span>Scan RAB dengan AI (Foto / Teks)</span>
+            </button>
+
+            {onOpenAiAudit && (
+              <button
+                onClick={onOpenAiAudit}
+                className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-colors cursor-pointer border border-emerald-200 shrink-0"
+                title="Cek anomali dan kelayakan harga/satuan RAB"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Audit Kelayakan AI</span>
+              </button>
+            )}
+
+            <button
+              onClick={downloadSampleRabTemplate}
+              className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer border border-slate-200 shrink-0"
+            >
+              <Download className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Download Template Excel</span>
+            </button>
+          </div>
         </div>
 
         {/* Drag & Drop or Browse Box */}
@@ -781,6 +899,137 @@ export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRa
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* AI Document / Image / Text Parser Modal */}
+      {isAiScanOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-fadeIn">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="bg-slate-900 text-white p-4 sm:px-6 flex items-center justify-between border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black">
+                  <Sparkles className="w-5 h-5 text-slate-950" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm sm:text-base">Ekstraksi Dokumen RAB dengan AI</h3>
+                  <p className="text-xs text-slate-400">Gemini 3.7 Multimodal OCR &amp; Table Parser</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAiScanOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
+              {/* Scan Mode Switch */}
+              <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setAiScanTab('image')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    aiScanTab === 'image'
+                      ? 'bg-white text-slate-950 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Camera className="w-4 h-4 text-amber-500" />
+                  <span>Foto / Screenshot Dokumen</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiScanTab('text')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    aiScanTab === 'text'
+                      ? 'bg-white text-slate-950 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <FileCode className="w-4 h-4 text-blue-500" />
+                  <span>Paste Teks Mentah / Tabel BQ</span>
+                </button>
+              </div>
+
+              {aiScanTab === 'image' ? (
+                <div className="space-y-3">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Upload Foto / Scan Lembar RAB (JPG / PNG):
+                  </label>
+                  <div className="border-2 border-dashed border-slate-300 hover:border-amber-500 rounded-xl p-6 text-center bg-slate-50 relative cursor-pointer">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAiImageSelect}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                    <div className="flex flex-col items-center space-y-2 pointer-events-none">
+                      <Camera className="w-8 h-8 text-amber-500" />
+                      <span className="text-xs font-bold text-slate-800">
+                        {aiScanImageBase64 ? '✓ Gambar Berhasil Dipilih (Klik untuk Ganti)' : 'Pilih Foto Lembar RAB dari Komputer / Kamera HP'}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Pastikan teks uraian, volume, dan harga satuan terlihat jelas dan terbaca.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Tempelkan (Paste) Teks / Tabel BQ / RAB Mentah:
+                  </label>
+                  <textarea
+                    rows={8}
+                    value={aiScanText}
+                    onChange={(e) => setAiScanText(e.target.value)}
+                    placeholder="Contoh:&#10;1.1 Pekerjaan Persiapan | 120 m2 | Rp 25.000&#10;1.2 Galian Tanah Pondasi | 45 m3 | Rp 85.000&#10;1.3 Urugan Pasir Bawah Pondasi | 12 m3 | Rp 180.000"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-900 focus:outline-none focus:border-amber-500"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    AI Gemini akan otomatis membedakan kode, kategori, deskripsi, volume, dan harga satuan meskipun formatnya tidak beraturan.
+                  </p>
+                </div>
+              )}
+
+              {aiParseError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                  <span>{aiParseError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-50 p-4 sm:px-6 border-t border-slate-200 flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsAiScanOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleRunAiExtraction}
+                disabled={isParsingAi}
+                className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-amber-400 font-bold text-xs rounded-xl shadow-md cursor-pointer transition-all"
+              >
+                {isParsingAi ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                    <span>Mengekstrak dengan AI...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>Ekstraksi Item RAB Sekarang</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

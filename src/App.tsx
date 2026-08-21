@@ -11,6 +11,7 @@ import { ProjectModal } from './components/ProjectModal';
 import { BackupExportModal } from './components/BackupExportModal';
 import { DeviceLockScreen } from './components/DeviceLockScreen';
 import { DeviceManagementModal } from './components/DeviceManagementModal';
+import { AiProjectAdvisorModal } from './components/AiProjectAdvisorModal';
 import { generateAutoPlannedDistributions, recalculateRabItems } from './utils/calculator';
 import { useFirebase } from './firebase/FirebaseContext';
 import { useLanguage } from './i18n/LanguageContext';
@@ -164,6 +165,15 @@ export default function App() {
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [cloudBannerDismissed, setCloudBannerDismissed] = useState(false);
+
+  // AI Project Advisor Modal State
+  const [isAiAdvisorOpen, setIsAiAdvisorOpen] = useState(false);
+  const [aiAdvisorInitialTab, setAiAdvisorInitialTab] = useState<'scurve' | 'report' | 'audit' | 'chat'>('scurve');
+
+  const handleOpenAiAdvisor = (tab: 'scurve' | 'report' | 'audit' | 'chat' = 'scurve') => {
+    setAiAdvisorInitialTab(tab);
+    setIsAiAdvisorOpen(true);
+  };
 
   // Sync to local storage
   useEffect(() => {
@@ -394,7 +404,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 font-sans flex flex-col antialiased">
+    <div className="min-h-screen bg-slate-100 text-slate-900 font-sans flex flex-col antialiased overflow-x-hidden max-w-full w-full">
       {/* Top Fixed Header */}
       <Navbar
         currentProject={currentProject}
@@ -403,6 +413,7 @@ export default function App() {
         onOpenNewProjectModal={() => setIsProjectModalOpen(true)}
         onOpenBackupModal={() => setIsBackupModalOpen(true)}
         onOpenDeviceModal={() => setIsDeviceModalOpen(true)}
+        onOpenAiAdvisor={() => handleOpenAiAdvisor('scurve')}
         onResetSampleData={handleResetSampleData}
         onManualCloudSync={handleManualCloudSync}
       />
@@ -416,7 +427,7 @@ export default function App() {
       />
 
       {/* Primary Workspace View Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5 overflow-x-hidden">
         {/* Toast for WhatsApp 1-Click Approval feedback */}
         {approvalToast && (
           <div className="p-4 rounded-xl bg-emerald-950 text-emerald-200 border border-emerald-500 shadow-xl flex items-center justify-between text-xs animate-fadeIn">
@@ -536,6 +547,7 @@ export default function App() {
             onNavigateTab={(tab) => setActiveTab(tab)}
             onOpenReportModal={() => setActiveTab('daily-report')}
             onOpenBackupModal={() => setIsBackupModalOpen(true)}
+            onOpenAiAdvisor={handleOpenAiAdvisor}
           />
         )}
 
@@ -543,6 +555,7 @@ export default function App() {
           <RabImport
             project={currentProject}
             onUpdateProjectRab={handleUpdateProjectRab}
+            onOpenAiAudit={() => handleOpenAiAdvisor('audit')}
           />
         )}
 
@@ -561,6 +574,21 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Floating AI Consultant Button (Bottom Right) */}
+      <div className="fixed bottom-5 right-5 z-30">
+        <button
+          onClick={() => handleOpenAiAdvisor('chat')}
+          className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-2xl shadow-xl border-2 border-white/60 hover:shadow-2xl hover:scale-105 transition-all cursor-pointer group"
+          title="Tanya Konsultan AI Proyek (Gemini 3.7)"
+        >
+          <div className="w-6 h-6 rounded-lg bg-slate-950 text-amber-400 flex items-center justify-center">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <span className="text-xs tracking-wide">Konsultan AI</span>
+          <span className="w-2 h-2 rounded-full bg-emerald-900 group-hover:animate-ping" />
+        </button>
+      </div>
 
       {/* Footer */}
       <footer className="bg-slate-900 text-slate-400 text-xs py-6 border-t border-slate-800 mt-auto">
@@ -601,6 +629,19 @@ export default function App() {
         onClose={() => setIsDeviceModalOpen(false)}
         currentDeviceId={currentDevice.id}
         adminEmail={user?.email || ADMIN_EMAIL}
+      />
+
+      {/* AI Project Advisor Modal */}
+      <AiProjectAdvisorModal
+        isOpen={isAiAdvisorOpen}
+        onClose={() => setIsAiAdvisorOpen(false)}
+        project={currentProject}
+        initialTab={aiAdvisorInitialTab}
+        onApplyAiParsedItems={(parsedItems) => {
+          const totalVal = parsedItems.reduce((acc, it) => acc + it.totalPrice, 0);
+          handleUpdateProjectRab(parsedItems, totalVal);
+          setActiveTab('rab-import');
+        }}
       />
     </div>
   );

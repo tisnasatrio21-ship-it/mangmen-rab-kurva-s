@@ -24,6 +24,7 @@ import {
   MoreVertical,
   X,
   Smartphone,
+  Sparkles,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -33,6 +34,7 @@ interface NavbarProps {
   onOpenNewProjectModal: () => void;
   onOpenBackupModal?: () => void;
   onOpenDeviceModal?: () => void;
+  onOpenAiAdvisor?: () => void;
   onResetSampleData: () => void;
   onManualCloudSync?: () => void;
 }
@@ -44,6 +46,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenNewProjectModal,
   onOpenBackupModal,
   onOpenDeviceModal,
+  onOpenAiAdvisor,
   onResetSampleData,
   onManualCloudSync,
 }) => {
@@ -145,6 +148,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             
             {/* Desktop-only Action Pills */}
             <div className="hidden md:flex items-center gap-1.5 lg:gap-2">
+              {/* AI Advisor Button */}
+              {onOpenAiAdvisor && (
+                <button
+                  onClick={onOpenAiAdvisor}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                  title="Konsultan AI Proyek (Gemini 3.7)"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-slate-950 shrink-0" />
+                  <span>AI Advisor</span>
+                </button>
+              )}
+
               {/* Language Switcher */}
               <button
                 onClick={toggleLanguage}
@@ -211,6 +226,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="px-2 py-1.5 text-[10px] font-bold text-amber-400 uppercase tracking-wider border-b border-slate-800">
                     Menu &amp; Fitur Tambahan
                   </div>
+
+                  {/* AI Advisor Button in Mobile Menu */}
+                  {onOpenAiAdvisor && (
+                    <button
+                      onClick={() => {
+                        onOpenAiAdvisor();
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-2 text-xs font-bold text-amber-300 hover:bg-slate-800 rounded-lg transition-colors text-left cursor-pointer bg-amber-500/10"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Konsultan AI Proyek (Gemini)</span>
+                    </button>
+                  )}
 
                   {/* Language */}
                   <button

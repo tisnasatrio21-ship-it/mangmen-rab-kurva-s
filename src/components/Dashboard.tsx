@@ -38,6 +38,7 @@ interface DashboardProps {
   onNavigateTab: (tab: 'rab-import' | 'timeline' | 'daily-report') => void;
   onOpenReportModal: () => void;
   onOpenBackupModal?: () => void;
+  onOpenAiAdvisor?: (tab?: 'scurve' | 'report' | 'audit' | 'chat') => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -45,6 +46,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigateTab,
   onOpenReportModal,
   onOpenBackupModal,
+  onOpenAiAdvisor,
 }) => {
   const { t, language } = useLanguage();
   const sPoints = calculateSCurvePoints(project);
@@ -344,6 +346,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              {onOpenAiAdvisor && (
+                <button
+                  onClick={() => onOpenAiAdvisor('scurve')}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer"
+                  title="Analisis Deviasi & Catch-up Plan menggunakan Gemini AI"
+                >
+                  <Sparkles className="w-4 h-4 text-slate-950" />
+                  <span>Analisis AI Kurva S</span>
+                </button>
+              )}
+
               <button
                 onClick={handleExportPdf}
                 disabled={isExportingPdf}
@@ -482,6 +495,48 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
+
+          {/* AI Project Advisor Quick Action Card */}
+          {onOpenAiAdvisor && (
+            <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/40 text-white p-5 rounded-2xl border border-amber-500/30 shadow-md space-y-3 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-amber-500 flex items-center justify-center text-slate-950 font-black">
+                    <Sparkles className="w-4 h-4 text-slate-950" />
+                  </div>
+                  <span className="font-extrabold text-xs text-amber-400 uppercase tracking-wider">
+                    AI Construction Advisor
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                  Gemini 3.7
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                {kpi.deviation < 0
+                  ? `Deviasi Kurva S terdeteksi (${kpi.deviation.toFixed(2)}%). Dapatkan rekomendasi Catch-up Plan & mitigasi percepatan tukang dengan AI.`
+                  : 'Gunakan AI untuk membuat narasi laporan mingguan otomatis atau audit kelayakan item RAB.'}
+              </p>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  onClick={() => onOpenAiAdvisor('scurve')}
+                  className="px-2.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] rounded-xl transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Catch-up Plan</span>
+                </button>
+                <button
+                  onClick={() => onOpenAiAdvisor('report')}
+                  className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] rounded-xl transition-colors flex items-center justify-center gap-1 cursor-pointer border border-slate-700"
+                >
+                  <FileText className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Narasi Laporan</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Category Progress Breakdown */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-3">

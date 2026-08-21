@@ -64,7 +64,7 @@ export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-between items-center p-4 sm:p-6 text-slate-100 antialiased selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 flex flex-col justify-between items-center p-4 sm:p-6 text-slate-100 antialiased selection:bg-amber-500 selection:text-slate-950 overflow-x-hidden max-w-full w-full">
       {/* Top Brand Bar */}
       <div className="w-full max-w-lg flex items-center justify-between py-2 border-b border-slate-800/80">
         <div className="flex items-center gap-2.5">
