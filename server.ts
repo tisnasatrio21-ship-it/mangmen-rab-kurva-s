@@ -27,8 +27,8 @@ app.post('/api/gemini/*', async (req, res) => {
   }
 });
 
-// Serve frontend static build if available
-const distPath = path.join(__dirname, 'dist');
+// Serve frontend static build
+const distPath = path.resolve(process.cwd(), 'dist');
 app.use(express.static(distPath));
 
 app.get('*', (req, res) => {
