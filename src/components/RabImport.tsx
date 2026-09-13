@@ -30,6 +30,8 @@ import {
   Camera,
   Loader2,
   FileCode,
+  Image as ImageIcon,
+  Smartphone,
 } from 'lucide-react';
 
 interface RabImportProps {
@@ -57,8 +59,12 @@ export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRa
   const [aiScanText, setAiScanText] = useState('');
   const [aiScanImageBase64, setAiScanImageBase64] = useState<string | null>(null);
   const [aiScanImageMime, setAiScanImageMime] = useState<string | null>(null);
+  const [aiScanFileName, setAiScanFileName] = useState<string | null>(null);
+  const [aiScanPreviewUrl, setAiScanPreviewUrl] = useState<string | null>(null);
   const [isParsingAi, setIsParsingAi] = useState(false);
   const [aiParseError, setAiParseError] = useState<string | null>(null);
+  const aiGalleryInputRef = useRef<HTMLInputElement>(null);
+  const aiCameraInputRef = useRef<HTMLInputElement>(null);
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
@@ -130,26 +136,52 @@ export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRa
     }
   };
 
-  // Handle AI File/Image Selection
-  const handleAiImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      setAiParseError('Harap pilih file gambar (JPG, PNG, WebP).');
+  // Handle AI File/Image Selection (Gallery or Native Camera)
+  const processAiFile = (file: File) => {
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+      setAiParseError('Harap pilih file gambar (JPG, PNG, WebP) atau dokumen PDF.');
       return;
     }
 
     setAiParseError(null);
     setAiScanImageMime(file.type);
+    setAiScanFileName(file.name);
 
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
       const base64Data = result.split(',')[1];
       setAiScanImageBase64(base64Data);
+      setAiScanPreviewUrl(result);
+    };
+    reader.onerror = () => {
+      setAiParseError('Gagal membaca file.');
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleAiGallerySelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processAiFile(file);
+    }
+    e.target.value = '';
+  };
+
+  const handleAiCameraSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processAiFile(file);
+    }
+    e.target.value = '';
+  };
+
+  const clearAiScanImage = () => {
+    setAiScanImageBase64(null);
+    setAiScanImageMime(null);
+    setAiScanFileName(null);
+    setAiScanPreviewUrl(null);
+    setAiParseError(null);
   };
 
   // Run AI RAB Extraction
@@ -956,26 +988,135 @@ export const RabImport: React.FC<RabImportProps> = ({ project, onUpdateProjectRa
 
               {aiScanTab === 'image' ? (
                 <div className="space-y-3">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Upload Foto / Scan Lembar RAB (JPG / PNG):
-                  </label>
-                  <div className="border-2 border-dashed border-slate-300 hover:border-amber-500 rounded-xl p-6 text-center bg-slate-50 relative cursor-pointer">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAiImageSelect}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                    <div className="flex flex-col items-center space-y-2 pointer-events-none">
-                      <Camera className="w-8 h-8 text-amber-500" />
-                      <span className="text-xs font-bold text-slate-800">
-                        {aiScanImageBase64 ? '✓ Gambar Berhasil Dipilih (Klik untuk Ganti)' : 'Pilih Foto Lembar RAB dari Komputer / Kamera HP'}
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Pastikan teks uraian, volume, dan harga satuan terlihat jelas dan terbaca.
-                      </span>
-                    </div>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Upload Foto / Dokumen Lembar RAB (JPG, PNG, PDF):
+                    </label>
+                    <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                      Gemini Vision OCR
+                    </span>
                   </div>
+
+                  {/* Hidden inputs for Gallery and Native Mobile Camera */}
+                  <input
+                    ref={aiGalleryInputRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={handleAiGallerySelect}
+                    className="hidden"
+                    id="ai-rab-gallery-input"
+                  />
+                  <input
+                    ref={aiCameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleAiCameraSelect}
+                    className="hidden"
+                    id="ai-rab-camera-input"
+                  />
+
+                  {aiScanImageBase64 ? (
+                    /* Preview Card of Selected Document / Photo */
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          <span className="text-xs font-bold text-slate-800 truncate max-w-[200px] sm:max-w-xs">
+                            {aiScanFileName || 'Dokumen RAB Terpilih'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={clearAiScanImage}
+                          className="text-xs text-rose-600 hover:text-rose-700 font-semibold cursor-pointer flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus</span>
+                        </button>
+                      </div>
+
+                      {aiScanPreviewUrl && aiScanImageMime?.startsWith('image/') ? (
+                        <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-white max-h-56 flex items-center justify-center p-1">
+                          <img
+                            src={aiScanPreviewUrl}
+                            alt="Preview RAB Scan"
+                            className="max-h-52 w-auto object-contain rounded"
+                          />
+                        </div>
+                      ) : (
+                        <div className="p-6 text-center bg-white rounded-lg border border-slate-200 flex flex-col items-center gap-2">
+                          <FileText className="w-10 h-10 text-amber-500" />
+                          <span className="text-xs font-bold text-slate-800">{aiScanFileName}</span>
+                          <span className="text-[11px] text-slate-500">Dokumen siap dianalisis oleh AI</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => aiGalleryInputRef.current?.click()}
+                          className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Ganti dari Galeri</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => aiCameraInputRef.current?.click()}
+                          className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Camera className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Foto Ulang Kamera</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Clean Dropzone with Gallery and Camera options */
+                    <div
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) processAiFile(file);
+                      }}
+                      className="border-2 border-dashed border-slate-300 hover:border-amber-500 rounded-xl p-6 text-center bg-slate-50 transition-colors space-y-4"
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
+                        <Upload className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-bold text-slate-800">
+                          Pilih Foto Lembar RAB atau Dokumen PDF
+                        </h4>
+                        <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                          Dapat berupa foto kertas kontrak, print-out RAB, scan dokumen, atau screenshot tabel BQ.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => aiGalleryInputRef.current?.click()}
+                          className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95"
+                        >
+                          <ImageIcon className="w-4 h-4" />
+                          <span>Pilih dari Galeri / File</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => aiCameraInputRef.current?.click()}
+                          className="w-full sm:w-auto px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs rounded-xl border border-slate-300 shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95"
+                        >
+                          <Smartphone className="w-4 h-4 text-emerald-600" />
+                          <span>Foto dengan Kamera HP</span>
+                        </button>
+                      </div>
+
+                      <p className="text-[10px] text-slate-400">Format didukung: JPG, PNG, WebP, PDF (Bisa Drag &amp; Drop)</p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2">

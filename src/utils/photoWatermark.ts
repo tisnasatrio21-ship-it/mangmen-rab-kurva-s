@@ -283,14 +283,28 @@ function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: num
  */
 export function loadImageFromFile(file: File | Blob): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
+    if (!file || !(file instanceof Blob)) {
+      reject(new Error('File foto tidak valid.'));
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
+      img.onload = async () => {
+        if ('decode' in img && typeof img.decode === 'function') {
+          try {
+            await img.decode();
+          } catch {
+            // Ignore decode failures if image is already loaded
+          }
+        }
+        resolve(img);
+      };
+      img.onerror = () => reject(new Error('Format gambar tidak dapat dibaca. Pastikan format JPG, PNG, atau WebP.'));
       img.src = e.target?.result as string;
     };
-    reader.onerror = reject;
+    reader.onerror = () => reject(new Error('Gagal membaca file dari penyimpanan perangkat.'));
     reader.readAsDataURL(file);
   });
 }

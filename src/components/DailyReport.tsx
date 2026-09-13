@@ -1,10 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Project, DailyReportItem, RabItem } from '../types/project';
 import { getPeriodNumberForDate, formatPercent, formatIDR } from '../utils/calculator';
 import { CameraCaptureModal } from './CameraCaptureModal';
 import { generateProjectPdfReport, generateDailyReportPdf } from '../utils/pdfExporter';
 import { exportDailyReportsToCsv } from '../utils/dataExporter';
 import { useLanguage } from '../i18n/LanguageContext';
+import {
+  loadImageFromFile,
+  applyWatermarkToImage,
+  getCurrentGpsPosition,
+  WatermarkOptions,
+} from '../utils/photoWatermark';
 import {
   ClipboardList,
   PlusCircle,
@@ -26,6 +32,9 @@ import {
   Upload,
   Download,
   Loader2,
+  Smartphone,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 
 interface DailyReportProps {
@@ -131,18 +140,53 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   // Period number for report date
   const periodNumber = getPeriodNumberForDate(project.startDate, formDate, project.totalPeriods);
 
-  // Handle Image File Upload (convert to DataURL / Object URL)
-  const handlePhotoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Photo upload & watermarking state in DailyReport
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+  const [photoProcessError, setPhotoProcessError] = useState<string | null>(null);
+  const directGalleryInputRef = useRef<HTMLInputElement>(null);
+  const directCameraInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle Direct Photo Upload (Gallery or Phone Camera) with auto GPS + Watermark
+  const handleDirectPhotoFile = async (file: File) => {
+    setIsProcessingPhoto(true);
+    setPhotoProcessError(null);
+    try {
+      const img = await loadImageFromFile(file);
+      const gps = await getCurrentGpsPosition();
+      const options: WatermarkOptions = {
+        projectName: project.name,
+        itemDescription: selectedItem ? `${selectedItem.code} - ${selectedItem.description}` : 'Pekerjaan Proyek',
+        locationName: project.location || 'Lokasi Proyek',
+        reporterName: reporterInput,
+        customWatermark: 'app by Tisna',
+        gpsCoords: gps,
+        customDate: new Date(formDate || Date.now()),
+      };
+
+      const stamped = await applyWatermarkToImage(img, options);
+      setPhotoUrlInput(stamped);
+    } catch (err: any) {
+      console.error('Error watermarking direct photo:', err);
+      setPhotoProcessError(err.message || 'Gagal memproses foto. Pastikan format JPG/PNG valid.');
+    } finally {
+      setIsProcessingPhoto(false);
+    }
+  };
+
+  const handleDirectGalleryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setPhotoUrlInput(event.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+      handleDirectPhotoFile(file);
     }
+    e.target.value = '';
+  };
+
+  const handleDirectCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleDirectPhotoFile(file);
+    }
+    e.target.value = '';
   };
 
   // Submit Form
@@ -380,41 +424,112 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                       Dokumentasi Foto Lapangan
                     </label>
                     <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
-                      GPS + Waktu + Watermark Tisna
+                      Auto-Watermark: GPS + Waktu + "app by Tisna"
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* Main Camera GPS Button */}
+                  {/* Hidden inputs for direct gallery and native camera */}
+                  <input
+                    ref={directGalleryInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleDirectGalleryChange}
+                    className="hidden"
+                    id="daily-gallery-input"
+                  />
+                  <input
+                    ref={directCameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleDirectCameraChange}
+                    className="hidden"
+                    id="daily-camera-input"
+                  />
+
+                  {/* Processing Watermark Indicator */}
+                  {isProcessingPhoto && (
+                    <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-2 text-xs text-amber-300 animate-pulse">
+                      <RefreshCw className="w-4 h-4 animate-spin text-amber-400 shrink-0" />
+                      <span>Memproses foto &amp; menempel watermark GPS "app by Tisna"...</span>
+                    </div>
+                  )}
+
+                  {/* Process Error Banner */}
+                  {photoProcessError && (
+                    <div className="p-2 bg-rose-950/80 border border-rose-600/70 rounded-xl text-xs text-rose-200 flex items-center justify-between gap-1">
+                      <div className="flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <span>{photoProcessError}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPhotoProcessError(null)}
+                        className="text-rose-400 hover:text-white p-1"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* 3 Upload Options: Gallery, Native Camera, & GPS HUD Viewfinder */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {/* 1. Gallery Button */}
+                    <button
+                      type="button"
+                      onClick={() => directGalleryInputRef.current?.click()}
+                      disabled={isProcessingPhoto}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-amber-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                      title="Pilih foto yang tersimpan di galeri HP / komputer"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Galeri HP / File</span>
+                    </button>
+
+                    {/* 2. Native Camera Shutter */}
+                    <button
+                      type="button"
+                      onClick={() => directCameraInputRef.current?.click()}
+                      disabled={isProcessingPhoto}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-emerald-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                      title="Buka kamera bawaan smartphone untuk foto fisik"
+                    >
+                      <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Kamera HP</span>
+                    </button>
+
+                    {/* 3. Interactive GPS Viewfinder Modal */}
                     <button
                       type="button"
                       onClick={() => setIsCameraModalOpen(true)}
-                      className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2 active:scale-95"
+                      disabled={isProcessingPhoto}
+                      className="px-3 py-2 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                      title="Lihat HUD live kamera dengan koordinat GPS real-time"
                     >
-                      <Camera className="w-4 h-4 text-slate-950" />
-                      <span>Buka Kamera GPS / Upload</span>
+                      <Camera className="w-3.5 h-3.5 text-slate-950" />
+                      <span>Live GPS Pro</span>
                     </button>
-
-                    <span className="text-[11px] text-slate-400">Atau contoh cepat:</span>
                   </div>
 
-                  {/* Sample Photo Pickers */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto pt-1 scrollbar-none">
-                    {samplePhotos.map((sp, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setPhotoUrlInput(sp.url)}
-                        className={`relative w-12 h-10 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
-                          photoUrlInput === sp.url
-                            ? 'border-amber-400 scale-105 shadow-md'
-                            : 'border-slate-700 opacity-70 hover:opacity-100'
-                        }`}
-                        title={sp.label}
-                      >
-                        <img src={sp.url} alt={sp.label} className="w-full h-full object-cover" />
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-slate-400 shrink-0">Contoh cepat:</span>
+                    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                      {samplePhotos.map((sp, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setPhotoUrlInput(sp.url)}
+                          className={`relative w-10 h-8 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
+                            photoUrlInput === sp.url
+                              ? 'border-amber-400 scale-105 shadow-md'
+                              : 'border-slate-700 opacity-70 hover:opacity-100'
+                          }`}
+                          title={sp.label}
+                        >
+                          <img src={sp.url} alt={sp.label} className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>

@@ -5,12 +5,13 @@ import {
   RefreshCw,
   MapPin,
   Clock,
-  Sparkles,
   Check,
   AlertCircle,
   FlipHorizontal,
   Upload,
-  Layers,
+  Image as ImageIcon,
+  Smartphone,
+  Info,
 } from 'lucide-react';
 import {
   applyWatermarkToImage,
@@ -39,12 +40,13 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   locationName,
   reporterName,
 }) => {
-  const [activeTab, setActiveTab] = useState<'camera' | 'upload'>('camera');
+  const [activeTab, setActiveTab] = useState<'camera' | 'gallery' | 'native'>('camera');
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [isCameraStarting, setIsCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processError, setProcessError] = useState<string | null>(null);
 
   // GPS and Live Time
   const [gpsCoords, setGpsCoords] = useState<{
@@ -58,7 +60,8 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   // Camera stream references
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const nativeCameraInputRef = useRef<HTMLInputElement>(null);
 
   // Live timer tick for on-screen timestamp overlay
   useEffect(() => {
@@ -93,7 +96,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Fitur kamera tidak didukung di browser ini.');
+        throw new Error('Fitur live kamera tidak didukung di browser ini.');
       }
 
       const constraints: MediaStreamConstraints = {
@@ -113,12 +116,12 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
         await videoRef.current.play();
       }
     } catch (err: any) {
-      console.error('Camera access error:', err);
-      let msg = 'Gagal mengakses kamera.';
+      console.warn('Camera access error:', err);
+      let msg = 'Tidak dapat mengakses live stream kamera.';
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        msg = 'Izin kamera ditolak. Silakan izinkan akses kamera di pengaturan browser.';
+        msg = 'Izin kamera ditolak oleh browser/perangkat. Anda tetap bisa menggunakan tab "Ambil dari Galeri" atau "Kamera HP (Native)".';
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        msg = 'Kamera tidak ditemukan pada perangkat ini.';
+        msg = 'Perangkat kamera tidak terdeteksi. Silakan gunakan tab "Ambil dari Galeri".';
       }
       setCameraError(msg);
     } finally {
@@ -156,6 +159,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
     if (!videoRef.current || isProcessing) return;
 
     setIsProcessing(true);
+    setProcessError(null);
     try {
       const options: WatermarkOptions = {
         projectName,
@@ -169,20 +173,18 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
 
       const stampedDataUrl = await applyWatermarkToImage(videoRef.current, options);
       setCapturedPreview(stampedDataUrl);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error stamping video snapshot:', err);
-      alert('Gagal mengambil foto dari kamera. Silakan coba lagi.');
+      setProcessError('Gagal mengambil foto dari kamera live. Silakan coba lagi.');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Handle Photo File Upload (From Gallery / Mobile File Picker)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  // Handle Photo File Upload (From Gallery or Native Phone Camera)
+  const handleFileProcess = async (file: File) => {
     setIsProcessing(true);
+    setProcessError(null);
     try {
       const img = await loadImageFromFile(file);
       const options: WatermarkOptions = {
@@ -197,11 +199,36 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
 
       const stampedDataUrl = await applyWatermarkToImage(img, options);
       setCapturedPreview(stampedDataUrl);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error stamping uploaded file:', err);
-      alert('Gagal memproses file foto.');
+      setProcessError(err.message || 'Gagal memproses file foto. Pastikan format JPG/PNG valid.');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleGalleryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileProcess(file);
+    }
+    e.target.value = '';
+  };
+
+  const handleNativeCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileProcess(file);
+    }
+    e.target.value = '';
+  };
+
+  // Drag and drop support
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      handleFileProcess(file);
     }
   };
 
@@ -216,6 +243,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   // Retake or discard photo
   const handleRetakePhoto = () => {
     setCapturedPreview(null);
+    setProcessError(null);
   };
 
   // Close and clean up
@@ -226,6 +254,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
     }
     setCapturedPreview(null);
     setCameraError(null);
+    setProcessError(null);
     onClose();
   };
 
@@ -236,14 +265,14 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-950">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center">
               <Camera className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-white">GPS Timestamp Camera</h3>
+              <h3 className="font-bold text-sm text-white">GPS Timestamp &amp; Watermark Photo</h3>
               <p className="text-[11px] text-amber-400 font-medium">
-                Auto-Watermark: Waktu, Koordinat GPS, &amp; "app by Tisna"
+                Auto-Watermark: Waktu, Lokasi GPS, &amp; "app by Tisna"
               </p>
             </div>
           </div>
@@ -258,66 +287,147 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
 
         {/* Mode Switch Tabs (Only when not previewing photo) */}
         {!capturedPreview && (
-          <div className="flex border-b border-slate-800 bg-slate-900/80 text-xs">
+          <div className="flex border-b border-slate-800 bg-slate-900/90 text-xs">
+            {/* Tab 1: Live Viewfinder */}
             <button
-              onClick={() => setActiveTab('camera')}
-              className={`flex-1 py-2.5 px-4 font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border-b-2 ${
+              onClick={() => {
+                setActiveTab('camera');
+                setCameraError(null);
+              }}
+              className={`flex-1 py-2.5 px-3 font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-b-2 ${
                 activeTab === 'camera'
                   ? 'border-amber-400 text-amber-400 bg-amber-500/10'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
               <Camera className="w-3.5 h-3.5" />
-              <span>Kamera Langsung</span>
+              <span>Live Kamera</span>
             </button>
+
+            {/* Tab 2: Gallery / Photo Roll */}
             <button
-              onClick={() => setActiveTab('upload')}
-              className={`flex-1 py-2.5 px-4 font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border-b-2 ${
-                activeTab === 'upload'
+              onClick={() => setActiveTab('gallery')}
+              className={`flex-1 py-2.5 px-3 font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-b-2 ${
+                activeTab === 'gallery'
                   ? 'border-amber-400 text-amber-400 bg-amber-500/10'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Ambil dari Galeri / File HP</span>
+              <ImageIcon className="w-3.5 h-3.5" />
+              <span>Galeri / Album</span>
+            </button>
+
+            {/* Tab 3: Native Mobile Camera Shutter */}
+            <button
+              onClick={() => setActiveTab('native')}
+              className={`flex-1 py-2.5 px-3 font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-b-2 ${
+                activeTab === 'native'
+                  ? 'border-amber-400 text-amber-400 bg-amber-500/10'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Kamera HP (Native)</span>
             </button>
           </div>
         )}
 
+        {/* Hidden File Inputs */}
+        {/* Gallery file picker (no capture attribute so gallery/photos app opens) */}
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleGalleryChange}
+          className="hidden"
+          id="gallery-input"
+        />
+        {/* Native phone camera picker (capture="environment" forces phone camera app) */}
+        <input
+          ref={nativeCameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleNativeCameraChange}
+          className="hidden"
+          id="native-camera-input"
+        />
+
         {/* Body Content */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 bg-slate-950 flex flex-col items-center justify-center min-h-[320px]">
+          {/* Processing / Loading State */}
+          {isProcessing && (
+            <div className="p-8 text-center space-y-3">
+              <RefreshCw className="w-10 h-10 text-amber-400 animate-spin mx-auto" />
+              <p className="text-sm font-bold text-white">Memproses Foto &amp; Menempel Watermark...</p>
+              <p className="text-xs text-slate-400">Menyematkan Waktu, Koordinat GPS, dan "app by Tisna"</p>
+            </div>
+          )}
+
+          {/* Process Error Banner */}
+          {processError && !isProcessing && (
+            <div className="w-full mb-3 p-3 bg-rose-950/80 border border-rose-600/70 rounded-xl text-xs text-rose-200 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{processError}</span>
+              </div>
+              <button
+                onClick={() => setProcessError(null)}
+                className="text-rose-400 hover:text-white p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* 1. Captured Preview State (Result Verification) */}
-          {capturedPreview ? (
+          {!isProcessing && capturedPreview ? (
             <div className="w-full space-y-3 flex flex-col items-center">
-              <div className="relative rounded-xl overflow-hidden border-2 border-amber-500/60 shadow-lg w-full max-h-[60vh] bg-black flex items-center justify-center">
+              <div className="relative rounded-xl overflow-hidden border-2 border-amber-500/60 shadow-lg w-full max-h-[58vh] bg-black flex items-center justify-center">
                 <img
                   src={capturedPreview}
                   alt="Hasil Foto dengan Watermark GPS"
-                  className="max-h-[58vh] w-full object-contain"
+                  className="max-h-[56vh] w-full object-contain"
                 />
-                <div className="absolute top-2 left-2 bg-emerald-500 text-slate-950 font-extrabold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 shadow">
+                <div className="absolute top-2 left-2 bg-emerald-500 text-slate-950 font-extrabold text-[10px] px-2.5 py-1 rounded-full flex items-center gap-1 shadow">
                   <Check className="w-3 h-3" />
                   Watermark &amp; GPS Berhasil Ditempel
                 </div>
               </div>
 
-              <p className="text-[11px] text-slate-300 text-center">
-                Foto siap dilampirkan pada Laporan Harian pekerjaan: <strong>{itemDescription}</strong>
-              </p>
+              <div className="text-[11px] text-slate-300 text-center bg-slate-900/90 border border-slate-800 rounded-lg py-1 px-3">
+                Pekerjaan: <strong>{itemDescription}</strong> • Proyek: <strong>{projectName}</strong>
+              </div>
             </div>
-          ) : activeTab === 'camera' ? (
+          ) : !isProcessing && activeTab === 'camera' ? (
             /* 2. Live Camera Viewfinder State */
-            <div className="w-full relative rounded-xl overflow-hidden bg-black border border-slate-800 shadow-inner aspect-[4/3] sm:aspect-[16/10] max-h-[55vh] flex items-center justify-center">
+            <div className="w-full relative rounded-xl overflow-hidden bg-black border border-slate-800 shadow-inner aspect-[4/3] sm:aspect-[16/10] max-h-[52vh] flex items-center justify-center">
               {cameraError ? (
-                <div className="p-6 text-center space-y-3 max-w-sm">
-                  <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
-                  <p className="text-xs text-rose-300 font-medium">{cameraError}</p>
-                  <button
-                    onClick={() => setActiveTab('upload')}
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow transition-colors cursor-pointer"
-                  >
-                    Gunakan Mode Upload Galeri
-                  </button>
+                <div className="p-6 text-center space-y-4 max-w-sm">
+                  <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-sm text-white">Live Kamera Terhalang</h4>
+                    <p className="text-xs text-rose-300/90 font-medium leading-relaxed">{cameraError}</p>
+                  </div>
+
+                  <div className="flex flex-col gap-2 pt-2">
+                    <button
+                      onClick={() => nativeCameraInputRef.current?.click()}
+                      className="w-full px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs rounded-xl shadow transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <Smartphone className="w-4 h-4" />
+                      <span>Buka Kamera HP Langsung</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('gallery')}
+                      className="w-full px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <ImageIcon className="w-4 h-4 text-amber-400" />
+                      <span>Pilih dari Galeri Foto</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <>
@@ -378,39 +488,61 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
                 </>
               )}
             </div>
-          ) : (
-            /* 3. Upload from Gallery State */
-            <div className="w-full text-center space-y-4 py-8 px-4 border-2 border-dashed border-slate-700 rounded-2xl bg-slate-900/50">
+          ) : !isProcessing && activeTab === 'gallery' ? (
+            /* 3. Upload from Gallery State (Clean photo library file picker) */
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              className="w-full text-center space-y-4 py-8 px-4 border-2 border-dashed border-slate-700 hover:border-amber-500/60 rounded-2xl bg-slate-900/50 transition-colors"
+            >
               <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
-                <Upload className="w-7 h-7" />
+                <ImageIcon className="w-7 h-7" />
               </div>
               <div className="space-y-1">
-                <h4 className="font-bold text-sm text-white">Pilih Foto dari Galeri Smartphone / Laptop</h4>
+                <h4 className="font-bold text-sm text-white">Pilih Foto dari Galeri / Album HP</h4>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  Sistem akan otomatis mencetak tanggal, waktu saat ini, koordinat GPS, dan watermark "app by Tisna" pada foto.
+                  Pilih foto dari penyimpanan galeri HP atau komputer. Sistem akan otomatis mencetak tanggal, koordinat GPS, dan watermark "app by Tisna".
                 </p>
               </div>
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileUpload}
-                className="hidden"
-                id="gallery-file-input"
-              />
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => galleryInputRef.current?.click()}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-all cursor-pointer inline-flex items-center justify-center gap-2"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  <span>Buka Galeri Foto</span>
+                </button>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-all cursor-pointer inline-flex items-center gap-2"
-              >
-                <Camera className="w-4 h-4" />
-                <span>Pilih Foto atau Kamera HP</span>
-              </button>
+              <p className="text-[11px] text-slate-500">Mendukung format JPG, PNG, WebP (Bisa Drag &amp; Drop)</p>
             </div>
-          )}
+          ) : !isProcessing && activeTab === 'native' ? (
+            /* 4. Native Phone Camera Shutter */
+            <div className="w-full text-center space-y-4 py-8 px-4 border-2 border-dashed border-amber-500/40 rounded-2xl bg-slate-900/50">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
+                <Smartphone className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="font-bold text-sm text-white">Jepret Langsung dengan Kamera Bawaan HP</h4>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  Membuka aplikasi kamera bawaan smartphone Anda untuk mengambil foto fisik pekerjaan konstruksi dengan resolusi maksimal.
+                </p>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => nativeCameraInputRef.current?.click()}
+                  className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-all cursor-pointer inline-flex items-center gap-2 active:scale-95"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Buka Aplikasi Kamera HP</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Footer Actions */}
