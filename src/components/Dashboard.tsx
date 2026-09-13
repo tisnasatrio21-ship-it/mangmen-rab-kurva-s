@@ -469,18 +469,45 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       +{formatPercent(kpi.latestReport.weightAdded)}
                     </span>
                   </div>
-                  {kpi.latestReport.photoUrl && (
-                    <div className="mt-2 relative rounded-lg overflow-hidden border border-slate-700 max-h-28">
-                      <img
-                        src={kpi.latestReport.photoUrl}
-                        alt="Foto Dokumentasi"
-                        className="w-full h-28 object-cover"
-                      />
-                      <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
-                        <ImageIcon className="w-3 h-3" /> Foto Lapangan
-                      </span>
-                    </div>
-                  )}
+                  {(() => {
+                    const r = kpi.latestReport;
+                    const photos = Array.isArray(r.photoUrls) && r.photoUrls.length > 0
+                      ? r.photoUrls.filter(Boolean)
+                      : (r.photoUrl ? [r.photoUrl] : []);
+                    if (photos.length === 0) return null;
+                    return (
+                      <div className="mt-2 space-y-1.5">
+                        <div className="relative rounded-lg overflow-hidden border border-slate-700 max-h-28">
+                          <img
+                            src={photos[0]}
+                            alt="Foto Dokumentasi Utama"
+                            className="w-full h-28 object-cover"
+                          />
+                          <span className="absolute bottom-1 right-1 bg-black/75 text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow">
+                            <ImageIcon className="w-3 h-3 text-amber-400" />
+                            {photos.length > 1 ? `${photos.length} Foto Lapangan` : 'Foto Lapangan'}
+                          </span>
+                        </div>
+                        {photos.length > 1 && (
+                          <div className="flex items-center gap-1.5 pt-0.5">
+                            {photos.slice(1, 4).map((p, idx) => (
+                              <img
+                                key={idx}
+                                src={p}
+                                alt={`Dokumentasi #${idx + 2}`}
+                                className="w-9 h-8 rounded-md object-cover border border-slate-700 shrink-0"
+                              />
+                            ))}
+                            {photos.length > 4 && (
+                              <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-1 rounded border border-slate-700 font-mono">
+                                +{photos.length - 4}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <p className="text-xs text-slate-400 italic">Belum ada laporan harian yang diinput.</p>

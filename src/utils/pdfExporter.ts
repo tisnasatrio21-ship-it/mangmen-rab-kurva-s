@@ -401,7 +401,9 @@ export async function generateProjectPdfReport(
 
   // --- SECTION: LAMPIRAN DOKUMENTASI FOTO LAPANGAN & LAPORAN HARIAN ---
   // Filter reports with photos or all reports if targeted
-  const reportsWithPhotos = project.dailyReports.filter((r) => Boolean(r.photoUrl));
+  const reportsWithPhotos = project.dailyReports.filter(
+    (r) => Boolean(r.photoUrl || (Array.isArray(r.photoUrls) && r.photoUrls.length > 0))
+  );
   const reportsToDisplay = options.targetDailyReportId
     ? project.dailyReports.filter((r) => r.id === options.targetDailyReportId)
     : options.targetDate
@@ -444,7 +446,10 @@ export async function generateProjectPdfReport(
 
     for (let i = 0; i < sortedReports.length; i++) {
       const report = sortedReports[i];
-      const hasPhoto = Boolean(report.photoUrl);
+      const photos = Array.isArray(report.photoUrls) && report.photoUrls.length > 0
+        ? report.photoUrls.filter(Boolean)
+        : (report.photoUrl ? [report.photoUrl] : []);
+      const hasPhoto = photos.length > 0;
       const cardH = hasPhoto ? 82 : 28;
 
       // Check if page needs break
@@ -489,9 +494,9 @@ export async function generateProjectPdfReport(
       doc.text(splitNotes, 21, currentY + 17);
 
       // Render Photo if exists
-      if (hasPhoto && report.photoUrl) {
+      if (hasPhoto && photos[0]) {
         try {
-          const imgObj = await loadImg(report.photoUrl);
+          const imgObj = await loadImg(photos[0]);
           if (imgObj) {
             const photoBoxW = 80;
             const photoBoxH = 58;
@@ -503,13 +508,14 @@ export async function generateProjectPdfReport(
             doc.roundedRect(photoX, photoY, photoBoxW, photoBoxH, 1.5, 1.5, 'F');
 
             // Embed image
-            doc.addImage(report.photoUrl, 'JPEG', photoX + 0.5, photoY + 0.5, photoBoxW - 1, photoBoxH - 1);
+            doc.addImage(photos[0], 'JPEG', photoX + 0.5, photoY + 0.5, photoBoxW - 1, photoBoxH - 1);
             
             // Photo caption
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(6.5);
             doc.setTextColor(217, 119, 6);
-            doc.text('✓ Lampiran Foto GPS Lapangan (app by Tisna)', photoX, photoY + photoBoxH + 4);
+            const extraPhotosSuffix = photos.length > 1 ? ` (+${photos.length - 1} foto)` : '';
+            doc.text(`✓ Lampiran Foto GPS (app by Tisna)${extraPhotosSuffix}`, photoX, photoY + photoBoxH + 4);
           }
         } catch (imgErr) {
           console.warn('Could not render report photo to PDF:', imgErr);
@@ -659,23 +665,30 @@ export async function generateDailyReportPdf(
   currentY += 26;
 
   // Photo Section
+  const photos = Array.isArray(dailyReport.photoUrls) && dailyReport.photoUrls.length > 0
+    ? dailyReport.photoUrls.filter(Boolean)
+    : (dailyReport.photoUrl ? [dailyReport.photoUrl] : []);
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10.5);
   doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
-  doc.text('FOTO DOKUMENTASI INSPEKSI (DENGAN GPS & TIMESTAMP)', 14, currentY);
+  const photoSectionTitle = photos.length > 1
+    ? `FOTO DOKUMENTASI INSPEKSI (${photos.length} FOTO DENGAN GPS & TIMESTAMP)`
+    : 'FOTO DOKUMENTASI INSPEKSI (DENGAN GPS & TIMESTAMP)';
+  doc.text(photoSectionTitle, 14, currentY);
 
   currentY += 4;
 
-  if (dailyReport.photoUrl) {
+  if (photos.length === 1) {
     try {
-      const imgObj = await loadImg(dailyReport.photoUrl);
+      const imgObj = await loadImg(photos[0]);
       if (imgObj) {
         const photoBoxW = 182;
-        const photoBoxH = 120;
+        const photoBoxH = 115;
         
         doc.setFillColor(15, 23, 42);
         doc.roundedRect(14, currentY, photoBoxW, photoBoxH, 2, 2, 'F');
-        doc.addImage(dailyReport.photoUrl, 'JPEG', 15, currentY + 1, photoBoxW - 2, photoBoxH - 2);
+        doc.addImage(photos[0], 'JPEG', 15, currentY + 1, photoBoxW - 2, photoBoxH - 2);
 
         currentY += photoBoxH + 4;
         doc.setFont('helvetica', 'bold');
@@ -685,6 +698,47 @@ export async function generateDailyReportPdf(
       }
     } catch (err) {
       console.warn('Failed to load daily report photo:', err);
+    }
+  } else if (photos.length >= 2) {
+    try {
+      const maxDisplay = Math.min(photos.length, 4);
+      const isFour = maxDisplay >= 3;
+      const boxW = 89;
+      const boxH = isFour ? 55 : 68;
+      
+      for (let pIdx = 0; pIdx < maxDisplay; pIdx++) {
+        const col = pIdx % 2;
+        const row = Math.floor(pIdx / 2);
+        const pX = 14 + col * (boxW + 4);
+        const pY = currentY + row * (boxH + 5);
+        
+        doc.setFillColor(15, 23, 42);
+        doc.roundedRect(pX, pY, boxW, boxH, 1.5, 1.5, 'F');
+        try {
+          doc.addImage(photos[pIdx], 'JPEG', pX + 0.5, pY + 0.5, boxW - 1, boxH - 1);
+        } catch (e) {
+          console.warn('Failed rendering sub photo:', e);
+        }
+        
+        // Caption
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6);
+        doc.setTextColor(amberColor[0], amberColor[1], amberColor[2]);
+        doc.text(`Foto #${pIdx + 1} GPS & Watermark (app by Tisna)`, pX + 1, pY + boxH + 3.5);
+      }
+      
+      const totalRows = Math.ceil(maxDisplay / 2);
+      currentY += totalRows * (boxH + 5) + 3;
+      
+      if (photos.length > 4) {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(7);
+        doc.setTextColor(100, 116, 139);
+        doc.text(`* Menampilkan 4 dari total ${photos.length} foto dokumentasi inspeksi.`, 14, currentY);
+        currentY += 4;
+      }
+    } catch (err) {
+      console.warn('Failed to render multi-photo grid:', err);
     }
   } else {
     doc.setFillColor(241, 245, 249);

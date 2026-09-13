@@ -32,6 +32,7 @@ export interface DailyReportItem {
   weightAdded: number; // % total project weight added
   notes?: string;
   photoUrl?: string;
+  photoUrls?: string[];
   reporterName?: string;
   createdAt: string;
 }

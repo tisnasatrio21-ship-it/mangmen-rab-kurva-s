@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Project, DailyReportItem, RabItem } from '../types/project';
 import { getPeriodNumberForDate, formatPercent, formatIDR } from '../utils/calculator';
 import { CameraCaptureModal } from './CameraCaptureModal';
@@ -35,6 +35,10 @@ import {
   Smartphone,
   RefreshCw,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Layers,
 } from 'lucide-react';
 
 interface DailyReportProps {
@@ -51,12 +55,57 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   const { t, language } = useLanguage();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
-  const [selectedPhotoModal, setSelectedPhotoModal] = useState<string | null>(null);
+  // Lightbox gallery modal state for viewing multiple photos in high resolution
+  const [previewGallery, setPreviewGallery] = useState<{
+    photos: string[];
+    activeIndex: number;
+    title?: string;
+    subtitle?: string;
+  } | null>(null);
+
+  // Keyboard navigation for photo gallery lightbox
+  useEffect(() => {
+    if (!previewGallery) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPreviewGallery(null);
+      } else if (e.key === 'ArrowLeft') {
+        setPreviewGallery((prev) =>
+          prev
+            ? {
+                ...prev,
+                activeIndex: (prev.activeIndex - 1 + prev.photos.length) % prev.photos.length,
+              }
+            : null
+        );
+      } else if (e.key === 'ArrowRight') {
+        setPreviewGallery((prev) =>
+          prev
+            ? {
+                ...prev,
+                activeIndex: (prev.activeIndex + 1) % prev.photos.length,
+              }
+            : null
+        );
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewGallery]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterWeek, setFilterWeek] = useState<string>('all');
   const [submitSuccessMsg, setSubmitSuccessMsg] = useState<string | null>(null);
   const [isExportingAllPdf, setIsExportingAllPdf] = useState(false);
   const [exportingReportId, setExportingReportId] = useState<string | null>(null);
+
+  // Helper to extract all photos attached to a daily report item
+  const getReportPhotos = (report: DailyReportItem): string[] => {
+    if (Array.isArray(report.photoUrls) && report.photoUrls.length > 0) {
+      return report.photoUrls.filter(Boolean);
+    }
+    return report.photoUrl ? [report.photoUrl] : [];
+  };
 
   // Export all documentation photos to PDF
   const handleExportFullReportPdf = async () => {
@@ -92,7 +141,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   const [volumeInput, setVolumeInput] = useState<number>(0);
   const [notesInput, setNotesInput] = useState<string>('');
   const [reporterInput, setReporterInput] = useState<string>('Site Inspector');
-  const [photoUrlInput, setPhotoUrlInput] = useState<string>('');
+  const [photoUrlsInput, setPhotoUrlsInput] = useState<string[]>([]);
 
   // Sample Site Construction Photos for quick selection
   const samplePhotos = [
@@ -146,16 +195,21 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   const directGalleryInputRef = useRef<HTMLInputElement>(null);
   const directCameraInputRef = useRef<HTMLInputElement>(null);
 
-  // Handle Direct Photo Upload (Gallery or Phone Camera) with auto GPS + Watermark
-  const handleDirectPhotoFile = async (file: File) => {
+  // Handle Direct Photo Uploads (Gallery or Phone Camera) with auto GPS + Watermark
+  const handleDirectPhotoFiles = async (files: FileList | File[]) => {
+    if (!files || files.length === 0) return;
     setIsProcessingPhoto(true);
     setPhotoProcessError(null);
     try {
-      const img = await loadImageFromFile(file);
+      const fileArray = Array.from(files).filter((f) => f.type.startsWith('image/'));
+      if (fileArray.length === 0) {
+        throw new Error('Harap pilih file gambar yang valid (JPG, PNG, WebP).');
+      }
+
       const gps = await getCurrentGpsPosition();
-      const options: WatermarkOptions = {
+      const optionsBase: WatermarkOptions = {
         projectName: project.name,
-        itemDescription: selectedItem ? `${selectedItem.code} - ${selectedItem.description}` : 'Pekerjaan Proyek',
+        itemDescription: selectedItem ? `[${selectedItem.code}] ${selectedItem.description}` : 'Pekerjaan Proyek',
         locationName: project.location || 'Lokasi Proyek',
         reporterName: reporterInput,
         customWatermark: 'app by Tisna',
@@ -163,10 +217,16 @@ export const DailyReport: React.FC<DailyReportProps> = ({
         customDate: new Date(formDate || Date.now()),
       };
 
-      const stamped = await applyWatermarkToImage(img, options);
-      setPhotoUrlInput(stamped);
+      const newStampedUrls: string[] = [];
+      for (const file of fileArray) {
+        const img = await loadImageFromFile(file);
+        const stamped = await applyWatermarkToImage(img, optionsBase);
+        newStampedUrls.push(stamped);
+      }
+
+      setPhotoUrlsInput((prev) => [...prev, ...newStampedUrls]);
     } catch (err: any) {
-      console.error('Error watermarking direct photo:', err);
+      console.error('Error watermarking direct photo(s):', err);
       setPhotoProcessError(err.message || 'Gagal memproses foto. Pastikan format JPG/PNG valid.');
     } finally {
       setIsProcessingPhoto(false);
@@ -174,19 +234,34 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   };
 
   const handleDirectGalleryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleDirectPhotoFile(file);
+    if (e.target.files && e.target.files.length > 0) {
+      handleDirectPhotoFiles(e.target.files);
     }
     e.target.value = '';
   };
 
   const handleDirectCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleDirectPhotoFile(file);
+    if (e.target.files && e.target.files.length > 0) {
+      handleDirectPhotoFiles(e.target.files);
     }
     e.target.value = '';
+  };
+
+  const handleRemovePhoto = (indexToRemove: number) => {
+    setPhotoUrlsInput((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handleClearAllPhotos = () => {
+    setPhotoUrlsInput([]);
+  };
+
+  const handleToggleSamplePhoto = (url: string) => {
+    setPhotoUrlsInput((prev) => {
+      if (prev.includes(url)) {
+        return prev.filter((u) => u !== url);
+      }
+      return [...prev, url];
+    });
   };
 
   // Submit Form
@@ -204,17 +279,18 @@ export const DailyReport: React.FC<DailyReportProps> = ({
       percentageAdded: Number(percentageAdded.toFixed(2)),
       weightAdded: Number(weightAdded.toFixed(4)),
       notes: notesInput,
-      photoUrl: photoUrlInput,
+      photoUrl: photoUrlsInput[0] || '',
+      photoUrls: photoUrlsInput,
       reporterName: reporterInput,
     });
 
     setSubmitSuccessMsg(
-      `Laporan harian berhasil disimpan! Tambahan progres +${weightAdded.toFixed(2)}% telah di-update secara real-time pada Kurva S.`
+      `Laporan harian berhasil disimpan dengan ${photoUrlsInput.length} foto dokumentasi! Tambahan progres +${weightAdded.toFixed(2)}% telah di-update secara real-time pada Kurva S.`
     );
     setIsFormOpen(false);
     setVolumeInput(0);
     setNotesInput('');
-    setPhotoUrlInput('');
+    setPhotoUrlsInput([]);
 
     setTimeout(() => setSubmitSuccessMsg(null), 5000);
   };
@@ -417,11 +493,11 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                   placeholder="Ir. Budi / Mandor Utama"
                 />
 
-                {/* Upgraded GPS Timestamp Camera & Photo Upload Section */}
+                {/* Upgraded Multi-Photo GPS Timestamp Camera & Photo Upload Section */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="block font-semibold text-slate-300">
-                      Dokumentasi Foto Lapangan
+                      Dokumentasi Foto Lapangan {photoUrlsInput.length > 0 && `(${photoUrlsInput.length} Terpilih)`}
                     </label>
                     <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
                       Auto-Watermark: GPS + Waktu + "app by Tisna"
@@ -432,6 +508,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                   <input
                     ref={directGalleryInputRef}
                     type="file"
+                    multiple
                     accept="image/*"
                     onChange={handleDirectGalleryChange}
                     className="hidden"
@@ -472,15 +549,15 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                     </div>
                   )}
 
-                  {/* 3 Upload Options: Gallery, Native Camera, & GPS HUD Viewfinder */}
+                  {/* 3 Upload Options: Gallery (Multiple), Native Camera, & GPS HUD Viewfinder */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {/* 1. Gallery Button */}
+                    {/* 1. Gallery Button (Multiple allowed) */}
                     <button
                       type="button"
                       onClick={() => directGalleryInputRef.current?.click()}
                       disabled={isProcessingPhoto}
                       className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-amber-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
-                      title="Pilih foto yang tersimpan di galeri HP / komputer"
+                      title="Pilih 1 atau beberapa foto sekaligus dari galeri HP / komputer"
                     >
                       <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
                       <span>Galeri HP / File</span>
@@ -492,7 +569,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                       onClick={() => directCameraInputRef.current?.click()}
                       disabled={isProcessingPhoto}
                       className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-emerald-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
-                      title="Buka kamera bawaan smartphone untuk foto fisik"
+                      title="Buka kamera smartphone untuk foto fisik (bisa foto berulang kali)"
                     >
                       <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Kamera HP</span>
@@ -518,15 +595,20 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                         <button
                           key={idx}
                           type="button"
-                          onClick={() => setPhotoUrlInput(sp.url)}
+                          onClick={() => handleToggleSamplePhoto(sp.url)}
                           className={`relative w-10 h-8 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
-                            photoUrlInput === sp.url
-                              ? 'border-amber-400 scale-105 shadow-md'
+                            photoUrlsInput.includes(sp.url)
+                              ? 'border-amber-400 scale-105 shadow-md ring-2 ring-amber-400/50'
                               : 'border-slate-700 opacity-70 hover:opacity-100'
                           }`}
-                          title={sp.label}
+                          title={`Klik untuk tambah/lepas foto: ${sp.label}`}
                         >
                           <img src={sp.url} alt={sp.label} className="w-full h-full object-cover" />
+                          {photoUrlsInput.includes(sp.url) && (
+                            <span className="absolute inset-0 bg-amber-500/20 flex items-center justify-center">
+                              <CheckCircle2 className="w-3 h-3 text-amber-300" />
+                            </span>
+                          )}
                         </button>
                       ))}
                     </div>
@@ -535,24 +617,123 @@ export const DailyReport: React.FC<DailyReportProps> = ({
               </div>
             </div>
 
-            {/* Selected Photo Preview */}
-            {photoUrlInput && (
-              <div className="relative rounded-xl overflow-hidden border border-amber-500/40 max-h-56 bg-slate-950 p-1 flex items-center justify-center">
-                <img
-                  src={photoUrlInput}
-                  alt="Preview Foto Lapangan"
-                  className="w-full max-h-52 object-contain rounded-lg"
-                />
-                <button
-                  type="button"
-                  onClick={() => setPhotoUrlInput('')}
-                  className="absolute top-3 right-3 bg-black/80 text-white p-1.5 rounded-full hover:bg-rose-600 shadow-md cursor-pointer transition-colors"
-                  title="Hapus foto"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <div className="absolute bottom-3 left-3 bg-slate-900/90 text-amber-300 text-[10px] font-bold px-2.5 py-1 rounded-lg border border-amber-500/40 shadow">
-                  ✓ Foto Terlampir dengan Watermark &amp; GPS
+            {/* Selected Photos Grid Preview (Multi-Photo) */}
+            {photoUrlsInput.length > 0 && (
+              <div className="space-y-2 bg-slate-900/80 p-3.5 rounded-xl border border-amber-500/40">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      {photoUrlsInput.length} Foto Dokumentasi Terlampir
+                    </span>
+                    <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700">
+                      Auto-Watermark GPS Aktif
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewGallery({
+                          photos: photoUrlsInput,
+                          activeIndex: 0,
+                          title: selectedItem ? `[${selectedItem.code}] ${selectedItem.description}` : 'Form Laporan',
+                          subtitle: `Total ${photoUrlsInput.length} foto dokumentasi siap disimpan`,
+                        })
+                      }
+                      className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Perbesar Galeri
+                    </button>
+                    {photoUrlsInput.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllPhotos}
+                        className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1 cursor-pointer ml-2"
+                      >
+                        <Trash2 className="w-3 h-3" /> Hapus Semua
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 pt-1">
+                  {photoUrlsInput.map((url, idx) => (
+                    <div
+                      key={idx}
+                      className="group relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950 aspect-[4/3] shadow-sm hover:border-amber-400 transition-all"
+                    >
+                      <img
+                        src={url}
+                        alt={`Dokumentasi Lapangan ${idx + 1}`}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                      />
+                      {/* Photo Index Badge */}
+                      <span className="absolute top-1.5 left-1.5 bg-black/75 text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded shadow">
+                        #{idx + 1}
+                      </span>
+
+                      {/* Hover Actions */}
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewGallery({
+                              photos: photoUrlsInput,
+                              activeIndex: idx,
+                              title: selectedItem ? `[${selectedItem.code}] ${selectedItem.description}` : 'Form Laporan',
+                              subtitle: `Foto #${idx + 1} dari ${photoUrlsInput.length}`,
+                            })
+                          }
+                          className="p-1.5 bg-slate-800/90 hover:bg-slate-700 text-white rounded-lg cursor-pointer"
+                          title="Lihat Detail Foto"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePhoto(idx)}
+                          className="p-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg cursor-pointer"
+                          title="Hapus Foto Ini"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Add More Photos Quick Action Card */}
+                  <div className="rounded-xl border-2 border-dashed border-slate-700 hover:border-amber-400/80 bg-slate-900/40 p-2 flex flex-col items-center justify-center text-center aspect-[4/3] transition-colors">
+                    <span className="text-[11px] font-semibold text-slate-300 mb-1.5 flex items-center gap-1">
+                      <Plus className="w-3 h-3 text-amber-400" /> Tambah Foto
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => directGalleryInputRef.current?.click()}
+                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-lg cursor-pointer transition-colors"
+                        title="Tambah dari Galeri"
+                      >
+                        <ImageIcon className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => directCameraInputRef.current?.click()}
+                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg cursor-pointer transition-colors"
+                        title="Tambah dengan Kamera HP"
+                      >
+                        <Smartphone className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsCameraModalOpen(true)}
+                        className="p-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg cursor-pointer transition-colors"
+                        title="Live GPS Pro"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -561,13 +742,13 @@ export const DailyReport: React.FC<DailyReportProps> = ({
               <button
                 type="button"
                 onClick={() => setIsFormOpen(false)}
-                className="px-4 py-2 text-slate-400 hover:text-white rounded-xl font-semibold"
+                className="px-4 py-2 text-slate-400 hover:text-white rounded-xl font-semibold cursor-pointer"
               >
                 Batal
               </button>
               <button
                 type="submit"
-                className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition-colors shadow flex items-center gap-1.5"
+                className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition-colors shadow flex items-center gap-1.5 cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>Simpan & Update Kurva S</span>
@@ -628,118 +809,258 @@ export const DailyReport: React.FC<DailyReportProps> = ({
               Belum ada riwayat laporan harian yang sesuai filter.
             </div>
           ) : (
-            filteredReports.map((report) => (
-              <div
-                key={report.id}
-                className="p-4 bg-white rounded-xl border border-slate-200/90 hover:border-slate-300 shadow-xs hover:shadow-sm transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
-              >
-                <div className="flex items-start gap-3">
-                  {report.photoUrl ? (
-                    <button
-                      onClick={() => setSelectedPhotoModal(report.photoUrl!)}
-                      className="w-16 h-16 rounded-xl overflow-hidden shrink-0 border border-slate-200 relative group cursor-pointer"
-                    >
-                      <img src={report.photoUrl} alt="Foto Log" className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
-                        <Eye className="w-4 h-4" />
+            filteredReports.map((report) => {
+              const reportPhotos = getReportPhotos(report);
+              const hasMultiplePhotos = reportPhotos.length > 1;
+
+              return (
+                <div
+                  key={report.id}
+                  className="p-4 bg-white rounded-xl border border-slate-200/90 hover:border-slate-300 shadow-xs hover:shadow-sm transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
+                >
+                  <div className="flex items-start gap-3">
+                    {reportPhotos.length > 0 ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() =>
+                            setPreviewGallery({
+                              photos: reportPhotos,
+                              activeIndex: 0,
+                              title: `${report.rabItemCode ? `[${report.rabItemCode}] ` : ''}${report.rabItemDescription || 'Pekerjaan RAB'}`,
+                              subtitle: `Laporan: ${report.date} • Pelapor: ${report.reporterName || 'Site Staff'}${hasMultiplePhotos ? ` (Total ${reportPhotos.length} Foto)` : ''}`,
+                            })
+                          }
+                          className="w-16 h-16 rounded-xl overflow-hidden shrink-0 border border-slate-200 relative group cursor-pointer shadow-xs"
+                          title="Klik untuk membuka galeri foto inspeksi"
+                        >
+                          <img src={reportPhotos[0]} alt="Foto Log" className="w-full h-full object-cover" />
+                          {hasMultiplePhotos && (
+                            <span className="absolute bottom-1 right-1 bg-amber-500 text-slate-950 font-bold text-[9px] px-1.5 py-0.5 rounded shadow flex items-center gap-0.5">
+                              <Layers className="w-2.5 h-2.5" />
+                              {reportPhotos.length}
+                            </span>
+                          )}
+                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                            <Eye className="w-4 h-4" />
+                          </div>
+                        </button>
+
+                        {/* Additional mini thumbnails preview on medium screens */}
+                        {hasMultiplePhotos && (
+                          <div className="hidden sm:flex flex-col gap-1">
+                            {reportPhotos.slice(1, 3).map((pUrl, pIdx) => (
+                              <button
+                                key={pIdx}
+                                onClick={() =>
+                                  setPreviewGallery({
+                                    photos: reportPhotos,
+                                    activeIndex: pIdx + 1,
+                                    title: `${report.rabItemCode ? `[${report.rabItemCode}] ` : ''}${report.rabItemDescription || 'Pekerjaan RAB'}`,
+                                    subtitle: `Laporan: ${report.date} • Foto #${pIdx + 2} dari ${reportPhotos.length}`,
+                                  })
+                                }
+                                className="w-7 h-7 rounded-md overflow-hidden border border-slate-200 hover:border-amber-400 cursor-pointer opacity-80 hover:opacity-100 transition-all"
+                                title={`Foto #${pIdx + 2}`}
+                              >
+                                <img src={pUrl} alt="Thumbnail tambahan" className="w-full h-full object-cover" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    </button>
-                  ) : (
-                    <div className="w-16 h-16 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center shrink-0 border border-slate-200">
-                      <ImageIcon className="w-6 h-6" />
+                    ) : (
+                      <div className="w-16 h-16 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center shrink-0 border border-slate-200">
+                        <ImageIcon className="w-6 h-6" />
+                      </div>
+                    )}
+
+                    <div className="space-y-1 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">
+                          {report.rabItemDescription || 'Pekerjaan RAB'}
+                        </span>
+                        <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded-md font-semibold">
+                          {report.rabItemCode || '-'}
+                        </span>
+                        <span className="bg-blue-50 text-blue-700 text-[10px] px-2 py-0.5 rounded-md font-semibold">
+                          Minggu ke-{report.periodNumber}
+                        </span>
+                        {hasMultiplePhotos && (
+                          <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[10px] px-2 py-0.5 rounded-md font-bold flex items-center gap-1">
+                            <Layers className="w-3 h-3 text-amber-600" />
+                            {reportPhotos.length} Foto
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-slate-600 line-clamp-2 italic">
+                        "{report.notes || 'Tidak ada catatan tambahan.'}"
+                      </p>
+
+                      <div className="flex items-center gap-4 text-[11px] text-slate-400 pt-1">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                          {new Date(report.date).toLocaleDateString('id-ID', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
+                        </span>
+                        <span>• Pelapor: {report.reporterName || 'Site Staff'}</span>
+                      </div>
                     </div>
-                  )}
+                  </div>
 
-                  <div className="space-y-1 text-xs">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-slate-900 text-sm">
-                        {report.rabItemDescription || 'Pekerjaan RAB'}
+                  <div className="flex items-center justify-between md:flex-col md:items-end gap-2 border-t md:border-t-0 pt-2 md:pt-0 border-slate-100 shrink-0">
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 block">Progres Ditambah:</span>
+                      <span className="font-extrabold text-amber-600 text-sm font-mono">
+                        +{formatPercent(report.weightAdded)} Bobot
                       </span>
-                      <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded-md font-semibold">
-                        {report.rabItemCode || '-'}
-                      </span>
-                      <span className="bg-blue-50 text-blue-700 text-[10px] px-2 py-0.5 rounded-md font-semibold">
-                        Minggu ke-{report.periodNumber}
+                      <span className="text-[11px] text-slate-500 font-mono block">
+                        ({report.volumeProgress} unit)
                       </span>
                     </div>
 
-                    <p className="text-slate-600 line-clamp-2 italic">
-                      "{report.notes || 'Tidak ada catatan tambahan.'}"
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleExportDailyItemPdf(report)}
+                        disabled={exportingReportId === report.id}
+                        className="px-2 py-1.5 text-[11px] font-semibold text-slate-700 hover:text-amber-700 bg-slate-100 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                        title="Cetak Lembar Laporan Harian Ini ke PDF"
+                      >
+                        {exportingReportId === report.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                        ) : (
+                          <Download className="w-3.5 h-3.5" />
+                        )}
+                        <span>Cetak PDF</span>
+                      </button>
 
-                    <div className="flex items-center gap-4 text-[11px] text-slate-400 pt-1">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        {new Date(report.date).toLocaleDateString('id-ID', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                        })}
-                      </span>
-                      <span>• Pelapor: {report.reporterName || 'Site Staff'}</span>
+                      <button
+                        onClick={() => onDeleteDailyReport(report.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        title="Hapus Laporan Ini"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 </div>
-
-                <div className="flex items-center justify-between md:flex-col md:items-end gap-2 border-t md:border-t-0 pt-2 md:pt-0 border-slate-100 shrink-0">
-                  <div className="text-right">
-                    <span className="text-[10px] text-slate-400 block">Progres Ditambah:</span>
-                    <span className="font-extrabold text-amber-600 text-sm font-mono">
-                      +{formatPercent(report.weightAdded)} Bobot
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-mono block">
-                      ({report.volumeProgress} unit)
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleExportDailyItemPdf(report)}
-                      disabled={exportingReportId === report.id}
-                      className="px-2 py-1.5 text-[11px] font-semibold text-slate-700 hover:text-amber-700 bg-slate-100 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50"
-                      title="Cetak Lembar Laporan Harian Ini ke PDF"
-                    >
-                      {exportingReportId === report.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
-                      ) : (
-                        <Download className="w-3.5 h-3.5" />
-                      )}
-                      <span>Cetak PDF</span>
-                    </button>
-
-                    <button
-                      onClick={() => onDeleteDailyReport(report.id)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                      title="Hapus Laporan Ini"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
 
-      {/* Photo Preview Modal */}
-      {selectedPhotoModal && (
+      {/* Multi-Photo Lightbox Gallery Modal with Carousel Navigation */}
+      {previewGallery && previewGallery.photos.length > 0 && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer"
-          onClick={() => setSelectedPhotoModal(null)}
+          className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-3 sm:p-6"
+          onClick={() => setPreviewGallery(null)}
         >
-          <div className="relative max-w-3xl w-full bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl p-2">
-            <button
-              onClick={() => setSelectedPhotoModal(null)}
-              className="absolute top-4 right-4 bg-black/70 text-white p-2 rounded-full hover:bg-rose-600 z-10 cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <img
-              src={selectedPhotoModal}
-              alt="Dokumentasi Foto Lapangan Detail"
-              className="w-full max-h-[80vh] object-contain rounded-xl"
-            />
+          <div
+            className="relative max-w-4xl w-full bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl flex flex-col max-h-[92vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-950/70">
+              <div className="min-w-0 pr-2">
+                <h4 className="text-sm font-bold text-slate-100 truncate">
+                  {previewGallery.title || 'Dokumentasi Lapangan'}
+                </h4>
+                {previewGallery.subtitle && (
+                  <p className="text-[11px] text-slate-400 truncate">{previewGallery.subtitle}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/30">
+                  Foto {previewGallery.activeIndex + 1} / {previewGallery.photos.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPreviewGallery(null)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
+                  title="Tutup (Esc)"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Image Viewer with Next/Prev Arrows */}
+            <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden min-h-[300px] sm:min-h-[440px] p-2">
+              <img
+                src={previewGallery.photos[previewGallery.activeIndex]}
+                alt={`Foto ${previewGallery.activeIndex + 1}`}
+                className="max-h-[68vh] w-full object-contain rounded-lg"
+              />
+
+              {/* Prev Button */}
+              {previewGallery.photos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPreviewGallery((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            activeIndex:
+                              (prev.activeIndex - 1 + prev.photos.length) % prev.photos.length,
+                          }
+                        : null
+                    )
+                  }
+                  className="absolute left-3 top-1/2 -translate-y-1/2 p-2.5 bg-black/60 hover:bg-amber-500 text-white hover:text-slate-950 rounded-full cursor-pointer shadow-lg transition-all backdrop-blur-xs"
+                  title="Foto Sebelumnya (Panah Kiri)"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+              )}
+
+              {/* Next Button */}
+              {previewGallery.photos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPreviewGallery((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            activeIndex: (prev.activeIndex + 1) % prev.photos.length,
+                          }
+                        : null
+                    )
+                  }
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 bg-black/60 hover:bg-amber-500 text-white hover:text-slate-950 rounded-full cursor-pointer shadow-lg transition-all backdrop-blur-xs"
+                  title="Foto Selanjutnya (Panah Kanan)"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              )}
+            </div>
+
+            {/* Bottom Thumbnail Strip for Multi-Photo */}
+            {previewGallery.photos.length > 1 && (
+              <div className="px-4 py-2.5 bg-slate-950/90 border-t border-slate-800 flex items-center gap-2 overflow-x-auto">
+                <span className="text-[10px] text-slate-400 shrink-0">Semua Foto:</span>
+                {previewGallery.photos.map((photo, i) => (
+                  <button
+                    key={i}
+                    onClick={() =>
+                      setPreviewGallery((prev) => (prev ? { ...prev, activeIndex: i } : null))
+                    }
+                    className={`relative w-12 h-10 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
+                      previewGallery.activeIndex === i
+                        ? 'border-amber-400 scale-105 shadow-md'
+                        : 'border-slate-800 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={photo} alt={`Thumb ${i + 1}`} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -749,7 +1070,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
         isOpen={isCameraModalOpen}
         onClose={() => setIsCameraModalOpen(false)}
         onPhotoCaptured={(dataUrl) => {
-          setPhotoUrlInput(dataUrl);
+          setPhotoUrlsInput((prev) => [...prev, dataUrl]);
         }}
         projectName={project.name}
         itemDescription={

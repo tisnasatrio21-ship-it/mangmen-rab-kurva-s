@@ -168,6 +168,10 @@ export function exportDailyReportsToCsv(project: Project): void {
     // find rab item unit
     const matchedRab = project.rabItems.find((item) => item.id === r.rabItemId);
     const unit = matchedRab ? matchedRab.unit : '-';
+    const photoCount = Array.isArray(r.photoUrls) && r.photoUrls.length > 0
+      ? r.photoUrls.length
+      : (r.photoUrl ? 1 : 0);
+    const photoStatus = photoCount > 0 ? `Ada Foto (${photoCount} Foto GPS)` : 'Tanpa Foto';
 
     rows.push([
       r.id,
@@ -181,7 +185,7 @@ export function exportDailyReportsToCsv(project: Project): void {
       r.weightAdded.toFixed(4),
       r.reporterName || 'Site Staff',
       r.notes || '',
-      r.photoUrl ? 'Ada Foto (GPS Timestamp)' : 'Tanpa Foto',
+      photoStatus,
     ]);
   });
 
