@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Project, RabItem, PlannedPeriodDistribution, DailyReportItem, AuthorizedDevice } from './types/project';
 import { sampleProject } from './data/sampleProject';
 import { Navbar } from './components/Navbar';
@@ -13,7 +13,10 @@ import { DeviceLockScreen } from './components/DeviceLockScreen';
 import { DeviceManagementModal } from './components/DeviceManagementModal';
 import { AiProjectAdvisorModal } from './components/AiProjectAdvisorModal';
 import { generateAutoPlannedDistributions, recalculateRabItems } from './utils/calculator';
+import { optimizeProjectPhotos } from './utils/photoWatermark';
+import { saveProjectsToIDB, loadProjectsFromIDB } from './utils/indexedDbStorage';
 import { useFirebase } from './firebase/FirebaseContext';
+import { getQuotaExceeded } from './firebase/firestoreErrors';
 import { useLanguage } from './i18n/LanguageContext';
 import {
   getOrCreateDeviceId,
@@ -31,6 +34,8 @@ import {
   Sparkles,
   LogIn,
   AlertCircle,
+  AlertTriangle,
+  ExternalLink,
   UploadCloud,
   Loader2,
   ShieldCheck,
@@ -51,6 +56,8 @@ export default function App() {
     isSyncing,
     syncStatus,
     signInWithGoogle,
+    isQuotaExceeded,
+    quotaUpgradeUrl,
   } = useFirebase();
 
   const { t, language } = useLanguage();
@@ -115,10 +122,14 @@ export default function App() {
     }
   }, [user]);
 
+  const hasAttemptedAdminApproval = useRef<Set<string>>(new Set());
+  const hasSeededCloudRef = useRef(false);
+
   // If user is Master Admin (tisnasatrio21@gmail.com), auto-approve this device and any pending WhatsApp links
   useEffect(() => {
     if (isUserMasterAdmin(user?.email)) {
-      if (currentDevice.status !== 'approved') {
+      if (currentDevice.status !== 'approved' && !hasAttemptedAdminApproval.current.has(currentDevice.id)) {
+        hasAttemptedAdminApproval.current.add(currentDevice.id);
         approveDevice(currentDevice.id, user?.email || ADMIN_EMAIL).catch(console.error);
         setCurrentDevice((prev) => ({
           ...prev,
@@ -127,13 +138,14 @@ export default function App() {
         }));
       }
 
-      if (approvalUrlParam) {
+      if (approvalUrlParam && !hasAttemptedAdminApproval.current.has(approvalUrlParam)) {
+        hasAttemptedAdminApproval.current.add(approvalUrlParam);
         approveDevice(approvalUrlParam, user?.email || ADMIN_EMAIL).then(() => {
           setApprovalToast(`Perangkat ${approvalUrlParam} berhasil DIIZINKAN oleh Pak Tisna!`);
           window.history.replaceState({}, document.title, window.location.pathname);
           setApprovalUrlParam(null);
           setTimeout(() => setApprovalToast(null), 6000);
-        });
+        }).catch(console.error);
       }
     }
   }, [user, currentDevice.id, currentDevice.status, approvalUrlParam]);
@@ -175,13 +187,100 @@ export default function App() {
     setIsAiAdvisorOpen(true);
   };
 
-  // Sync to local storage
+  // Hydrate projects and full photos from IndexedDB (gigabyte storage capacity)
   useEffect(() => {
+    let isMounted = true;
+    loadProjectsFromIDB().then((idbProjects) => {
+      if (isMounted && idbProjects && idbProjects.length > 0) {
+        setProjects((prev) => {
+          // Count total photos to determine if IndexedDB has more data
+          const getPhotoCount = (pList: Project[]) =>
+            pList.reduce(
+              (acc, p) =>
+                acc +
+                (p.dailyReports || []).reduce(
+                  (rAcc, r) => rAcc + (r.photoUrls?.length || (r.photoUrl ? 1 : 0)),
+                  0
+                ),
+              0
+            );
+
+          const prevPhotos = getPhotoCount(prev);
+          const idbPhotos = getPhotoCount(idbProjects);
+
+          if (idbPhotos >= prevPhotos || idbProjects.length > prev.length) {
+            console.log(`Hydrated ${idbProjects.length} projects with ${idbPhotos} photos from IndexedDB.`);
+            return idbProjects;
+          }
+          return prev;
+        });
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Auto-optimize existing project photos on boot to shrink any large photos (>90KB)
+  // down to compact web-safe sizes (~50-70KB), ensuring localStorage and Firestore limits are never breached.
+  useEffect(() => {
+    let isMounted = true;
+    const runOptimization = async () => {
+      let anyChanged = false;
+      const updated = await Promise.all(
+        projects.map(async (p) => {
+          const { project, didCompress } = await optimizeProjectPhotos(p);
+          if (didCompress) anyChanged = true;
+          return project;
+        })
+      );
+      if (anyChanged && isMounted) {
+        setProjects(updated);
+        console.log('Project photos auto-optimized for compact storage.');
+      }
+    };
+    runOptimization();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Find active project or fallback to first
+  const currentProject =
+    projects.find((p) => p.id === activeProjectId) || projects[0] || sampleProject;
+
+  // Dual storage sync:
+  // 1. IndexedDB: Stores unlimited photos (Gigabytes capacity for 5-month+ projects).
+  // 2. LocalStorage: Fast synchronous cache (with graceful fallback if >5MB).
+  useEffect(() => {
+    // Save to IndexedDB (asynchronous, supports hundreds of MBs/GBs of photos)
+    saveProjectsToIDB(projects).catch((err) => console.warn('IndexedDB save notice:', err));
+
+    // Save to LocalStorage
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(projects));
       localStorage.setItem(LOCAL_STORAGE_ACTIVE_ID, activeProjectId);
     } catch (e) {
-      console.error('Failed to save to local storage:', e);
+      console.warn('LocalStorage limit reached (>5MB). Saving lightweight index to LocalStorage while IndexedDB preserves all photos:', e);
+      try {
+        // Keep active project photos, strip older project photos from localStorage only
+        const lightweightProjects = projects.map((p) => ({
+          ...p,
+          dailyReports: (p.dailyReports || []).map((r, idx, arr) => {
+            // Keep recent 10 photos in localStorage, older photos remain safely in IndexedDB
+            const isRecent = idx >= arr.length - 10;
+            return {
+              ...r,
+              photoUrl: isRecent ? r.photoUrl : '',
+              photoUrls: isRecent ? r.photoUrls : [],
+            };
+          }),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(lightweightProjects));
+        localStorage.setItem(LOCAL_STORAGE_ACTIVE_ID, activeProjectId);
+      } catch (err2) {
+        console.warn('LocalStorage fallback note:', err2);
+      }
     }
   }, [projects, activeProjectId]);
 
@@ -193,20 +292,17 @@ export default function App() {
         if (!cloudProjects.some((p) => p.id === activeProjectId)) {
           setActiveProjectId(cloudProjects[0].id);
         }
-      } else if (projects.length > 0) {
-        // If user is logged in but cloud has no projects yet, sync current local projects to cloud
+      } else if (projects.length > 0 && !hasSeededCloudRef.current && !isQuotaExceeded && !getQuotaExceeded()) {
+        hasSeededCloudRef.current = true;
+        // If user is logged in but cloud has no projects yet, sync current local projects once
         projects.forEach((proj) => {
           syncProjectToCloud(proj).catch((err) => {
-            console.error('Initial cloud seed error:', err);
+            console.warn('Initial cloud seed notice:', err);
           });
         });
       }
     }
-  }, [user, cloudProjects]);
-
-  // Find active project or fallback to first
-  const currentProject =
-    projects.find((p) => p.id === activeProjectId) || projects[0] || sampleProject;
+  }, [user, cloudProjects, isQuotaExceeded]);
 
   // Helper to persist and sync project
   const updateAndSyncProject = useCallback(
@@ -214,13 +310,13 @@ export default function App() {
       setProjects((prev) =>
         prev.map((p) => (p.id === updatedProject.id ? updatedProject : p))
       );
-      if (user) {
+      if (user && !isQuotaExceeded && !getQuotaExceeded()) {
         syncProjectToCloud(updatedProject).catch((err) => {
-          console.error('Cloud auto-sync error:', err);
+          console.warn('Cloud auto-sync notice:', err);
         });
       }
     },
-    [user, syncProjectToCloud]
+    [user, isQuotaExceeded, syncProjectToCloud]
   );
 
   // Manual Trigger to save current project to Firebase Firestore
@@ -229,9 +325,22 @@ export default function App() {
       await signInWithGoogle();
       return;
     }
+    if (isQuotaExceeded) {
+      alert(
+        '⚠️ Kuota Harian Firestore (Free Tier) Tercapai.\n\n' +
+        'Penyimpanan lokal di perangkat Anda tetap berfungsi 100% aman (offline-first). ' +
+        'Kuota tulis gratis harian akan di-reset otomatis esok hari oleh Google Firestore, ' +
+        'atau Anda dapat meng-upgrade database melalui Firebase Console.'
+      );
+      return;
+    }
     if (currentProject) {
-      await syncProjectToCloud(currentProject);
-      alert(`Proyek "${currentProject.name}" berhasil disinkronkan ke Firebase Firestore!`);
+      try {
+        await syncProjectToCloud(currentProject);
+        alert(`Proyek "${currentProject.name}" berhasil disinkronkan ke Firebase Firestore!`);
+      } catch (e) {
+        console.warn('Manual sync notice:', e);
+      }
     }
   };
 
@@ -301,6 +410,18 @@ export default function App() {
     updateAndSyncProject(updated);
   };
 
+  // Handle updating an existing Daily Report (e.g. adding more photos)
+  const handleUpdateDailyReport = (updatedReport: DailyReportItem) => {
+    const updated: Project = {
+      ...currentProject,
+      dailyReports: currentProject.dailyReports.map((r) =>
+        r.id === updatedReport.id ? updatedReport : r
+      ),
+    };
+
+    updateAndSyncProject(updated);
+  };
+
   // Handle create new project
   const handleSaveNewProject = (projectData: Partial<Project>) => {
     const defaultRab = sampleProject.rabItems.slice(0, 5);
@@ -334,7 +455,7 @@ export default function App() {
     setActiveProjectId(newProj.id);
     setActiveTab('rab-import');
 
-    if (user) {
+    if (user && !isQuotaExceeded && !getQuotaExceeded()) {
       syncProjectToCloud(newProj).catch((err) =>
         console.error('Failed to sync new project to Firestore:', err)
       );
@@ -351,7 +472,7 @@ export default function App() {
       setProjects([sampleProject]);
       setActiveProjectId(sampleProject.id);
       setActiveTab('dashboard');
-      if (user) {
+      if (user && !isQuotaExceeded && !getQuotaExceeded()) {
         syncProjectToCloud(sampleProject);
       }
     }
@@ -372,7 +493,7 @@ export default function App() {
     setActiveProjectId(imported[0].id);
     setActiveTab('dashboard');
 
-    if (user) {
+    if (user && !isQuotaExceeded && !getQuotaExceeded()) {
       imported.forEach((proj) => {
         syncProjectToCloud(proj).catch((err) => {
           console.error('Failed to sync restored project to cloud:', err);
@@ -470,8 +591,44 @@ export default function App() {
           </div>
         )}
 
+        {/* Quota Exceeded Alert Banner */}
+        {isQuotaExceeded && (
+          <div className="p-3.5 sm:p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-xs animate-fadeIn">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-sm text-amber-900">
+                    Batas Kuota Harian Firestore (Free Tier Spark) Tercapai
+                  </span>
+                  <span className="bg-amber-200/80 text-amber-900 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    Offline-First Aktif
+                  </span>
+                </div>
+                <p className="text-slate-700 leading-relaxed text-[11px] sm:text-xs">
+                  Aplikasi tetap beroperasi <strong>100% normal</strong>. Semua RAB, Kurva S, dan foto laporan harian Anda tersimpan aman di <em>penyimpanan lokal (browser)</em>. Kuota tulis gratis akan di-reset otomatis besok oleh Google Firestore, atau Anda dapat meng-upgrade database ke Pay-as-you-go (Blaze).
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+              <a
+                href={quotaUpgradeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-xs transition-colors whitespace-nowrap cursor-pointer text-xs"
+              >
+                <span>Buka Firebase Console</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </div>
+        )}
+
         {/* Firebase Cloud Sync Banner */}
-        {!cloudBannerDismissed && (
+        {!cloudBannerDismissed && !isQuotaExceeded && (
           <div
             className={`p-3.5 sm:p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs transition-all ${
               user
@@ -571,6 +728,7 @@ export default function App() {
             project={currentProject}
             onAddDailyReport={handleAddDailyReport}
             onDeleteDailyReport={handleDeleteDailyReport}
+            onUpdateDailyReport={handleUpdateDailyReport}
           />
         )}
       </main>

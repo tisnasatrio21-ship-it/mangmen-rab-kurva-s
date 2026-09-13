@@ -45,16 +45,26 @@ interface DailyReportProps {
   project: Project;
   onAddDailyReport: (newReport: Omit<DailyReportItem, 'id' | 'createdAt'>) => void;
   onDeleteDailyReport: (reportId: string) => void;
+  onUpdateDailyReport?: (updatedReport: DailyReportItem) => void;
 }
 
 export const DailyReport: React.FC<DailyReportProps> = ({
   project,
   onAddDailyReport,
   onDeleteDailyReport,
+  onUpdateDailyReport,
 }) => {
   const { t, language } = useLanguage();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  // Manage photos modal for existing report
+  const [managePhotosReport, setManagePhotosReport] = useState<DailyReportItem | null>(null);
+  const [managePhotosList, setManagePhotosList] = useState<string[]>([]);
+  const [isProcessingManagePhoto, setIsProcessingManagePhoto] = useState(false);
+  const [managePhotoError, setManagePhotoError] = useState<string | null>(null);
+  const manageGalleryInputRef = useRef<HTMLInputElement>(null);
+  const manageCameraInputRef = useRef<HTMLInputElement>(null);
+
   // Lightbox gallery modal state for viewing multiple photos in high resolution
   const [previewGallery, setPreviewGallery] = useState<{
     photos: string[];
@@ -262,6 +272,89 @@ export const DailyReport: React.FC<DailyReportProps> = ({
       }
       return [...prev, url];
     });
+  };
+
+  // Open modal to manage / add more photos to an existing report
+  const handleOpenManagePhotos = (report: DailyReportItem) => {
+    setManagePhotosReport(report);
+    setManagePhotosList(getReportPhotos(report));
+    setManagePhotoError(null);
+  };
+
+  // Handle files added to existing report
+  const handleManagePhotoFiles = async (files: FileList | File[]) => {
+    if (!files || files.length === 0 || !managePhotosReport) return;
+    setIsProcessingManagePhoto(true);
+    setManagePhotoError(null);
+    try {
+      const fileArray = Array.from(files).filter((f) => f.type.startsWith('image/'));
+      if (fileArray.length === 0) {
+        throw new Error('Harap pilih file gambar yang valid (JPG, PNG, WebP).');
+      }
+
+      const gps = await getCurrentGpsPosition();
+      const optionsBase: WatermarkOptions = {
+        projectName: project.name,
+        itemDescription: managePhotosReport.rabItemDescription
+          ? `${managePhotosReport.rabItemCode ? `[${managePhotosReport.rabItemCode}] ` : ''}${managePhotosReport.rabItemDescription}`
+          : 'Pekerjaan Proyek',
+        locationName: project.location || 'Lokasi Proyek',
+        reporterName: managePhotosReport.reporterName || 'Site Staff',
+        customWatermark: 'app by Tisna',
+        gpsCoords: gps,
+        customDate: new Date(managePhotosReport.date || Date.now()),
+      };
+
+      const newStampedUrls: string[] = [];
+      for (const file of fileArray) {
+        const img = await loadImageFromFile(file);
+        const stamped = await applyWatermarkToImage(img, optionsBase);
+        newStampedUrls.push(stamped);
+      }
+
+      setManagePhotosList((prev) => [...prev, ...newStampedUrls]);
+    } catch (err: any) {
+      console.error('Error watermarking added photo(s):', err);
+      setManagePhotoError(err.message || 'Gagal memproses foto.');
+    } finally {
+      setIsProcessingManagePhoto(false);
+    }
+  };
+
+  const handleManageGalleryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleManagePhotoFiles(e.target.files);
+    }
+    e.target.value = '';
+  };
+
+  const handleManageCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleManagePhotoFiles(e.target.files);
+    }
+    e.target.value = '';
+  };
+
+  const handleRemoveManagePhoto = (idxToRemove: number) => {
+    setManagePhotosList((prev) => prev.filter((_, i) => i !== idxToRemove));
+  };
+
+  const handleSaveManagePhotos = () => {
+    if (!managePhotosReport || !onUpdateDailyReport) return;
+    const updated: DailyReportItem = {
+      ...managePhotosReport,
+      photoUrl: managePhotosList[0] || '',
+      photoUrls: managePhotosList,
+    };
+    onUpdateDailyReport(updated);
+    const countDiff = managePhotosList.length - getReportPhotos(managePhotosReport).length;
+    setSubmitSuccessMsg(
+      countDiff > 0
+        ? `Berhasil menambahkan ${countDiff} foto baru! Total sekarang ${managePhotosList.length} foto dokumentasi tersimpan.`
+        : `Foto dokumentasi laporan berhasil diperbarui (total ${managePhotosList.length} foto).`
+    );
+    setManagePhotosReport(null);
+    setTimeout(() => setSubmitSuccessMsg(null), 5000);
   };
 
   // Submit Form
@@ -550,42 +643,49 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                   )}
 
                   {/* 3 Upload Options: Gallery (Multiple), Native Camera, & GPS HUD Viewfinder */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {/* 1. Gallery Button (Multiple allowed) */}
-                    <button
-                      type="button"
-                      onClick={() => directGalleryInputRef.current?.click()}
-                      disabled={isProcessingPhoto}
-                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-amber-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
-                      title="Pilih 1 atau beberapa foto sekaligus dari galeri HP / komputer"
-                    >
-                      <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Galeri HP / File</span>
-                    </button>
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-amber-300/90 bg-amber-950/40 border border-amber-500/20 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span><strong>Bisa tambah lebih dari 1 foto:</strong> Pilih banyak foto sekaligus dari galeri atau jepret kamera HP berulang kali.</span>
+                    </p>
 
-                    {/* 2. Native Camera Shutter */}
-                    <button
-                      type="button"
-                      onClick={() => directCameraInputRef.current?.click()}
-                      disabled={isProcessingPhoto}
-                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-emerald-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
-                      title="Buka kamera smartphone untuk foto fisik (bisa foto berulang kali)"
-                    >
-                      <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Kamera HP</span>
-                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {/* 1. Gallery Button (Multiple allowed) */}
+                      <button
+                        type="button"
+                        onClick={() => directGalleryInputRef.current?.click()}
+                        disabled={isProcessingPhoto}
+                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-amber-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                        title="Pilih 1 atau beberapa foto sekaligus dari galeri HP / komputer"
+                      >
+                        <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Galeri HP / File</span>
+                      </button>
 
-                    {/* 3. Interactive GPS Viewfinder Modal */}
-                    <button
-                      type="button"
-                      onClick={() => setIsCameraModalOpen(true)}
-                      disabled={isProcessingPhoto}
-                      className="px-3 py-2 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
-                      title="Lihat HUD live kamera dengan koordinat GPS real-time"
-                    >
-                      <Camera className="w-3.5 h-3.5 text-slate-950" />
-                      <span>Live GPS Pro</span>
-                    </button>
+                      {/* 2. Native Camera Shutter */}
+                      <button
+                        type="button"
+                        onClick={() => directCameraInputRef.current?.click()}
+                        disabled={isProcessingPhoto}
+                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-emerald-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                        title="Buka kamera smartphone untuk foto fisik (bisa foto berulang kali)"
+                      >
+                        <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Kamera HP</span>
+                      </button>
+
+                      {/* 3. Interactive GPS Viewfinder Modal */}
+                      <button
+                        type="button"
+                        onClick={() => setIsCameraModalOpen(true)}
+                        disabled={isProcessingPhoto}
+                        className="px-3 py-2 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                        title="Lihat HUD live kamera dengan koordinat GPS real-time"
+                      >
+                        <Camera className="w-3.5 h-3.5 text-slate-950" />
+                        <span>Live GPS Pro</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-1.5 pt-1">
@@ -923,6 +1023,22 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5">
+                      {onUpdateDailyReport && (
+                        <button
+                          onClick={() => handleOpenManagePhotos(report)}
+                          className="px-2.5 py-1.5 text-[11px] font-semibold text-amber-900 hover:text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-300/80 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                          title="Tambah atau kelola foto dokumentasi pada laporan ini"
+                        >
+                          <Camera className="w-3.5 h-3.5 text-amber-600" />
+                          <span>+ Tambah Foto</span>
+                          {reportPhotos.length > 0 && (
+                            <span className="bg-amber-500 text-slate-950 text-[10px] font-extrabold px-1.5 py-0.2 rounded-full">
+                              {reportPhotos.length}
+                            </span>
+                          )}
+                        </button>
+                      )}
+
                       <button
                         onClick={() => handleExportDailyItemPdf(report)}
                         disabled={exportingReportId === report.id}
@@ -1065,21 +1181,241 @@ export const DailyReport: React.FC<DailyReportProps> = ({
         </div>
       )}
 
+      {/* Modal Kelola & Tambah Foto Laporan Tertentu */}
+      {managePhotosReport && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl rounded-2xl p-5 sm:p-6 shadow-2xl text-white my-8 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-4 border-b border-slate-800 shrink-0">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 bg-amber-500/20 text-amber-400 rounded-lg">
+                    <Camera className="w-5 h-5" />
+                  </span>
+                  <h3 className="text-base sm:text-lg font-bold text-white">
+                    Kelola &amp; Tambah Foto Dokumentasi
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-400">
+                  {managePhotosReport.rabItemCode ? `[${managePhotosReport.rabItemCode}] ` : ''}
+                  {managePhotosReport.rabItemDescription || 'Pekerjaan RAB'} • Tanggal: {managePhotosReport.date}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setManagePhotosReport(null)}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
+                title="Tutup"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Hidden file inputs */}
+            <input
+              ref={manageGalleryInputRef}
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={handleManageGalleryChange}
+              className="hidden"
+            />
+            <input
+              ref={manageCameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleManageCameraChange}
+              className="hidden"
+            />
+
+            {/* Scrollable Content */}
+            <div className="py-4 space-y-4 overflow-y-auto flex-1 pr-1">
+              {/* Add New Photos Action Panel */}
+              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Plus className="w-4 h-4 text-amber-400" />
+                    Tambah Foto Baru ke Laporan Ini
+                  </span>
+                  <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
+                    Auto-Watermark GPS "app by Tisna"
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => manageGalleryInputRef.current?.click()}
+                    disabled={isProcessingManagePhoto}
+                    className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-amber-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                    title="Pilih beberapa foto sekaligus dari galeri ponsel/laptop"
+                  >
+                    <ImageIcon className="w-4 h-4 text-amber-400" />
+                    <span>Pilih Banyak (Galeri)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => manageCameraInputRef.current?.click()}
+                    disabled={isProcessingManagePhoto}
+                    className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold text-xs rounded-xl border border-slate-700 hover:border-emerald-400/50 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                    title="Jepret foto langsung dengan kamera (bisa berulang kali)"
+                  >
+                    <Smartphone className="w-4 h-4 text-emerald-400" />
+                    <span>Jepret Kamera HP</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsCameraModalOpen(true)}
+                    disabled={isProcessingManagePhoto}
+                    className="px-3 py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                    title="Buka viewfinder kamera live dengan GPS HUD"
+                  >
+                    <Camera className="w-4 h-4 text-slate-950" />
+                    <span>Live GPS Pro</span>
+                  </button>
+                </div>
+
+                {isProcessingManagePhoto && (
+                  <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-2 text-xs text-amber-300 animate-pulse">
+                    <RefreshCw className="w-4 h-4 animate-spin text-amber-400 shrink-0" />
+                    <span>Memproses foto &amp; menempelkan watermark GPS "app by Tisna"...</span>
+                  </div>
+                )}
+
+                {managePhotoError && (
+                  <div className="p-2 bg-rose-950/80 border border-rose-600/70 rounded-xl text-xs text-rose-200 flex items-center justify-between gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      <span>{managePhotoError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setManagePhotoError(null)}
+                      className="text-rose-400 hover:text-white p-1"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Photo Gallery Grid */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-amber-400" />
+                    Daftar Foto Dokumentasi ({managePhotosList.length} Foto)
+                  </span>
+                  {managePhotosList.length > 0 && (
+                    <span className="text-[11px] text-slate-400">
+                      Klik foto untuk memperbesar, atau ikon tong sampah untuk menghapus
+                    </span>
+                  )}
+                </div>
+
+                {managePhotosList.length === 0 ? (
+                  <div className="text-center py-8 bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-400 text-xs">
+                    Belum ada foto dokumentasi yang dilampirkan pada laporan ini.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {managePhotosList.map((url, idx) => (
+                      <div
+                        key={idx}
+                        className="group relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950 aspect-[4/3] shadow-sm hover:border-amber-400 transition-all"
+                      >
+                        <img
+                          src={url}
+                          alt={`Foto Dokumentasi ${idx + 1}`}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        />
+                        <span className="absolute top-1.5 left-1.5 bg-black/80 text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded shadow">
+                          #{idx + 1}
+                        </span>
+
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewGallery({
+                                photos: managePhotosList,
+                                activeIndex: idx,
+                                title: managePhotosReport.rabItemDescription || 'Dokumentasi',
+                                subtitle: `Foto #${idx + 1} dari ${managePhotosList.length}`,
+                              })
+                            }
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg cursor-pointer"
+                            title="Lihat Detail Foto"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveManagePhoto(idx)}
+                            className="p-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg cursor-pointer"
+                            title="Hapus Foto Ini"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="pt-4 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
+              <span className="text-xs text-slate-400">
+                Total: <strong className="text-amber-400">{managePhotosList.length} Foto</strong>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setManagePhotosReport(null)}
+                  className="px-4 py-2 text-slate-400 hover:text-white rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveManagePhotos}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-md cursor-pointer transition-all flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Simpan Foto ({managePhotosList.length})</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* GPS Timestamp Camera Modal */}
       <CameraCaptureModal
         isOpen={isCameraModalOpen}
         onClose={() => setIsCameraModalOpen(false)}
         onPhotoCaptured={(dataUrl) => {
-          setPhotoUrlsInput((prev) => [...prev, dataUrl]);
+          if (managePhotosReport) {
+            setManagePhotosList((prev) => [...prev, dataUrl]);
+          } else {
+            setPhotoUrlsInput((prev) => [...prev, dataUrl]);
+          }
         }}
         projectName={project.name}
         itemDescription={
-          selectedItem
+          managePhotosReport
+            ? `${managePhotosReport.rabItemCode ? `[${managePhotosReport.rabItemCode}] ` : ''}${managePhotosReport.rabItemDescription || 'Pekerjaan Lapangan'}`
+            : selectedItem
             ? `[${selectedItem.code}] ${selectedItem.description}`
             : 'Pekerjaan Lapangan'
         }
         locationName={project.location || 'Site Lapangan'}
-        reporterName={reporterInput || 'Site Inspector'}
+        reporterName={managePhotosReport?.reporterName || reporterInput || 'Site Inspector'}
       />
     </div>
   );

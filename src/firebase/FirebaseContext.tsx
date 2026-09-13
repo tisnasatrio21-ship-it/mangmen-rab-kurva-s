@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
 import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, googleProvider } from './config';
 import {
@@ -6,15 +6,27 @@ import {
   deleteProjectFromFirestore,
   subscribeToProjects,
 } from './firestoreService';
+import {
+  getQuotaExceeded,
+  setQuotaExceeded,
+  isQuotaExceededError,
+} from './firestoreErrors';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { Project } from '../types/project';
+
+export const FIRESTORE_UPGRADE_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId}/data?openUpgradeDialog=true`;
+
+export type SyncStatusType = 'synced' | 'syncing' | 'offline' | 'error' | 'quota-exceeded';
 
 interface FirebaseContextType {
   user: User | null;
   isLoadingAuth: boolean;
   isSyncing: boolean;
-  syncStatus: 'synced' | 'syncing' | 'offline' | 'error';
+  syncStatus: SyncStatusType;
   lastSyncedAt: Date | null;
   cloudProjects: Project[];
+  isQuotaExceeded: boolean;
+  quotaUpgradeUrl: string;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   syncProjectToCloud: (project: Project) => Promise<void>;
@@ -27,9 +39,11 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [user, setUser] = useState<User | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error'>('synced');
+  const [isQuotaExceededState, setIsQuotaExceededState] = useState<boolean>(() => getQuotaExceeded());
+  const [syncStatus, setSyncStatus] = useState<SyncStatusType>(() => (getQuotaExceeded() ? 'quota-exceeded' : 'synced'));
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [cloudProjects, setCloudProjects] = useState<Project[]>([]);
+  const hasSubscribedRef = useRef(false);
 
   // Listen to Auth State
   useEffect(() => {
@@ -44,6 +58,13 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
   useEffect(() => {
     if (!user) {
       setCloudProjects([]);
+      hasSubscribedRef.current = false;
+      return;
+    }
+
+    if (getQuotaExceeded()) {
+      setIsQuotaExceededState(true);
+      setSyncStatus('quota-exceeded');
       return;
     }
 
@@ -55,8 +76,14 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
         setLastSyncedAt(new Date());
       },
       (err) => {
+        if (isQuotaExceededError(err)) {
+          setQuotaExceeded(true);
+          setIsQuotaExceededState(true);
+          setSyncStatus('quota-exceeded');
+        } else {
+          setSyncStatus('offline');
+        }
         console.warn('Realtime sync notice:', err);
-        setSyncStatus('offline');
       }
     );
 
@@ -85,6 +112,12 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   const syncProjectToCloud = async (project: Project) => {
     if (!user) return;
+    if (getQuotaExceeded() || isQuotaExceededState) {
+      setIsQuotaExceededState(true);
+      setSyncStatus('quota-exceeded');
+      return;
+    }
+
     try {
       setIsSyncing(true);
       setSyncStatus('syncing');
@@ -92,8 +125,14 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
       setSyncStatus('synced');
       setLastSyncedAt(new Date());
     } catch (error) {
-      console.error('Failed to sync project to cloud:', error);
-      setSyncStatus('error');
+      if (isQuotaExceededError(error)) {
+        setQuotaExceeded(true);
+        setIsQuotaExceededState(true);
+        setSyncStatus('quota-exceeded');
+      } else {
+        setSyncStatus('error');
+      }
+      console.warn('Failed to sync project to cloud notice:', error);
     } finally {
       setIsSyncing(false);
     }
@@ -101,11 +140,22 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   const deleteProjectFromCloud = async (projectId: string) => {
     if (!user) return;
+    if (getQuotaExceeded() || isQuotaExceededState) {
+      setIsQuotaExceededState(true);
+      setSyncStatus('quota-exceeded');
+      return;
+    }
+
     try {
       setIsSyncing(true);
       await deleteProjectFromFirestore(projectId);
     } catch (error) {
-      console.error('Failed to delete project from cloud:', error);
+      if (isQuotaExceededError(error)) {
+        setQuotaExceeded(true);
+        setIsQuotaExceededState(true);
+        setSyncStatus('quota-exceeded');
+      }
+      console.warn('Failed to delete project from cloud notice:', error);
     } finally {
       setIsSyncing(false);
     }
@@ -120,6 +170,8 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
         syncStatus,
         lastSyncedAt,
         cloudProjects,
+        isQuotaExceeded: isQuotaExceededState,
+        quotaUpgradeUrl: FIRESTORE_UPGRADE_URL,
         signInWithGoogle,
         logout,
         syncProjectToCloud,

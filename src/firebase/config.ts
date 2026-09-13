@@ -21,11 +21,23 @@ googleProvider.setCustomParameters({
 // Validate connection to Firestore on boot
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
+    const isExceeded =
+      typeof window !== 'undefined' &&
+      (sessionStorage.getItem('firestore_quota_exceeded') === 'true' ||
+        Boolean(localStorage.getItem('firestore_quota_exceeded_timestamp')));
+    if (isExceeded) {
+      return false;
+    }
     await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firestore is currently running offline or connection is pending:', error);
+    if (
+      error instanceof Error &&
+      (error.message.includes('client is offline') ||
+        error.message.includes('resource-exhausted') ||
+        error.message.includes('Quota'))
+    ) {
+      console.warn('Firestore is running in offline mode or quota reached:', error.message);
       return false;
     }
     // Any other error or permissions error is fine (it means connected to server)

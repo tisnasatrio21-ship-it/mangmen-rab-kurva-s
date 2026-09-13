@@ -25,6 +25,7 @@ import {
   X,
   Smartphone,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -391,18 +392,29 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {user ? (
-              <button
-                onClick={onManualCloudSync}
-                className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
-                title="Status Sinkron Cloud"
-              >
-                {syncStatus === 'syncing' ? (
-                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                ) : (
-                  <Cloud className="w-3 h-3 shrink-0" />
-                )}
-                <span className="hidden xs:inline">{syncStatus === 'syncing' ? t.cloudSyncing : t.cloudSynced}</span>
-              </button>
+              syncStatus === 'quota-exceeded' ? (
+                <button
+                  onClick={onManualCloudSync}
+                  className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-semibold cursor-pointer bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30"
+                  title="Kuota Firestore Harian Penuh - Penyimpanan Lokal Aktif"
+                >
+                  <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span className="hidden xs:inline text-[10px]">Kuota Penuh (Lokal Aktif)</span>
+                </button>
+              ) : (
+                <button
+                  onClick={onManualCloudSync}
+                  className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
+                  title="Status Sinkron Cloud"
+                >
+                  {syncStatus === 'syncing' ? (
+                    <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                  ) : (
+                    <Cloud className="w-3 h-3 shrink-0" />
+                  )}
+                  <span className="hidden xs:inline">{syncStatus === 'syncing' ? t.cloudSyncing : t.cloudSynced}</span>
+                </button>
+              )
             ) : (
               <span className="flex items-center gap-1 text-slate-500">
                 <CloudOff className="w-3 h-3 shrink-0" />

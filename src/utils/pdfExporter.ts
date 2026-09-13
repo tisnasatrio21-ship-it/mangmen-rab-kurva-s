@@ -505,29 +505,41 @@ export async function generateProjectPdfReport(
       const remainingLines = Math.max(1, Math.floor((currentY + cardH - 5 - cursorY) / 3.8));
       doc.text(splitNotes.slice(0, remainingLines), 21, cursorY);
 
-      // Render Photo if exists
+      // Render Photo(s) if exists
       if (hasPhoto && photos[0]) {
         try {
-          const imgObj = await loadImg(photos[0]);
-          if (imgObj) {
-            const photoBoxW = 80;
-            const photoBoxH = 58;
-            const photoX = 112;
-            const photoY = currentY + 15;
+          const photoBoxW = 80;
+          const photoBoxH = 58;
+          const photoX = 112;
+          const photoY = currentY + 15;
 
-            // Photo border frame
+          if (photos.length >= 2 && photos[1]) {
+            const subBoxW = 39;
+            const subBoxGap = 2;
+            // First photo
             doc.setFillColor(15, 23, 42);
-            doc.roundedRect(photoX, photoY, photoBoxW, photoBoxH, 1.5, 1.5, 'F');
+            doc.roundedRect(photoX, photoY, subBoxW, photoBoxH, 1.5, 1.5, 'F');
+            doc.addImage(photos[0], 'JPEG', photoX + 0.5, photoY + 0.5, subBoxW - 1, photoBoxH - 1);
 
-            // Embed image
-            doc.addImage(photos[0], 'JPEG', photoX + 0.5, photoY + 0.5, photoBoxW - 1, photoBoxH - 1);
-            
-            // Photo caption
+            // Second photo
+            doc.roundedRect(photoX + subBoxW + subBoxGap, photoY, subBoxW, photoBoxH, 1.5, 1.5, 'F');
+            doc.addImage(photos[1], 'JPEG', photoX + subBoxW + subBoxGap + 0.5, photoY + 0.5, subBoxW - 1, photoBoxH - 1);
+
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(6.5);
             doc.setTextColor(217, 119, 6);
-            const extraPhotosSuffix = photos.length > 1 ? ` (+${photos.length - 1} foto)` : '';
-            doc.text(`✓ Lampiran Foto GPS (app by Tisna)${extraPhotosSuffix}`, photoX, photoY + photoBoxH + 4);
+            const remainingSuffix = photos.length > 2 ? ` (+${photos.length - 2} foto lainnya)` : '';
+            doc.text(`✓ 2 Foto Terlampir (app by Tisna)${remainingSuffix}`, photoX, photoY + photoBoxH + 4);
+          } else {
+            // Single photo full width
+            doc.setFillColor(15, 23, 42);
+            doc.roundedRect(photoX, photoY, photoBoxW, photoBoxH, 1.5, 1.5, 'F');
+            doc.addImage(photos[0], 'JPEG', photoX + 0.5, photoY + 0.5, photoBoxW - 1, photoBoxH - 1);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(6.5);
+            doc.setTextColor(217, 119, 6);
+            doc.text(`✓ Lampiran Foto GPS (app by Tisna)`, photoX, photoY + photoBoxH + 4);
           }
         } catch (imgErr) {
           console.warn('Could not render report photo to PDF:', imgErr);

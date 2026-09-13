@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { AuthorizedDevice, DeviceStatus } from '../types/project';
-import { handleFirestoreError, OperationType } from '../firebase/firestoreErrors';
+import { handleFirestoreError, OperationType, getQuotaExceeded, setQuotaExceeded, isQuotaExceededError } from '../firebase/firestoreErrors';
 
 export const ADMIN_PHONE_NUMBER = '6281315762352'; // Pak Tisna WhatsApp
 export const ADMIN_EMAIL = 'tisnasatrio21@gmail.com'; // Master Admin Email
@@ -20,6 +20,7 @@ const DEVICES_COLLECTION = 'authorized_devices';
 const LOCAL_DEVICE_ID_KEY = 'tisna_rab_device_id';
 const LOCAL_DEVICE_NAME_KEY = 'tisna_rab_device_name';
 const LOCAL_DEVICE_CREATED_KEY = 'tisna_rab_device_created';
+const LOCAL_DEVICE_APPROVED_PREFIX = 'tisna_device_approved_';
 
 /**
  * Detect client OS, browser, and device model in human-readable Indonesian
@@ -124,16 +125,31 @@ export async function registerDeviceInFirestore(
   deviceId: string,
   deviceName: string
 ): Promise<AuthorizedDevice> {
+  const isLocallyApproved = localStorage.getItem(`${LOCAL_DEVICE_APPROVED_PREFIX}${deviceId}`) === 'true';
+
+  if (getQuotaExceeded()) {
+    return {
+      id: deviceId,
+      deviceName,
+      status: isLocallyApproved ? 'approved' : 'pending',
+      requestedAt: new Date().toISOString(),
+    };
+  }
+
   const docRef = doc(db, DEVICES_COLLECTION, deviceId);
   try {
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       const data = snap.data();
+      const status = (data.status as DeviceStatus) || (isLocallyApproved ? 'approved' : 'pending');
+      if (status === 'approved') {
+        localStorage.setItem(`${LOCAL_DEVICE_APPROVED_PREFIX}${deviceId}`, 'true');
+      }
       return {
         id: snap.id,
         deviceName: data.deviceName || deviceName,
         userAgent: data.userAgent || navigator.userAgent,
-        status: (data.status as DeviceStatus) || 'pending',
+        status,
         requestedAt: data.requestedAt || new Date().toISOString(),
         approvedAt: data.approvedAt,
         approvedBy: data.approvedBy,
@@ -144,19 +160,22 @@ export async function registerDeviceInFirestore(
       id: deviceId,
       deviceName,
       userAgent: navigator.userAgent.substring(0, 450),
-      status: 'pending',
+      status: isLocallyApproved ? 'approved' : 'pending',
       requestedAt: new Date().toISOString(),
     };
 
     await setDoc(docRef, newDevice);
     return newDevice;
   } catch (error) {
-    console.error('Error registering device in Firestore:', error);
-    // Return a fallback local pending object
+    if (isQuotaExceededError(error)) {
+      setQuotaExceeded(true);
+    }
+    console.warn('Notice registering device in Firestore:', error);
+    // Return a fallback local pending/approved object
     return {
       id: deviceId,
       deviceName,
-      status: 'pending',
+      status: isLocallyApproved ? 'approved' : 'pending',
       requestedAt: new Date().toISOString(),
     };
   }
@@ -170,17 +189,25 @@ export function subscribeToDeviceStatus(
   onStatusChange: (device: AuthorizedDevice) => void,
   onError?: (err: any) => void
 ): Unsubscribe {
+  if (getQuotaExceeded()) {
+    return () => {};
+  }
+
   const docRef = doc(db, DEVICES_COLLECTION, deviceId);
   return onSnapshot(
     docRef,
     (snap) => {
       if (snap.exists()) {
         const data = snap.data();
+        const status = (data.status as DeviceStatus) || 'pending';
+        if (status === 'approved') {
+          localStorage.setItem(`${LOCAL_DEVICE_APPROVED_PREFIX}${deviceId}`, 'true');
+        }
         onStatusChange({
           id: snap.id,
           deviceName: data.deviceName || 'Perangkat Web',
           userAgent: data.userAgent || '',
-          status: (data.status as DeviceStatus) || 'pending',
+          status,
           requestedAt: data.requestedAt || new Date().toISOString(),
           approvedAt: data.approvedAt,
           approvedBy: data.approvedBy,
@@ -188,6 +215,9 @@ export function subscribeToDeviceStatus(
       }
     },
     (err) => {
+      if (isQuotaExceededError(err)) {
+        setQuotaExceeded(true);
+      }
       console.warn('Device status listener notice:', err);
       if (onError) onError(err);
     }
@@ -201,6 +231,11 @@ export function subscribeToAllDevices(
   onUpdate: (devices: AuthorizedDevice[]) => void,
   onError?: (err: any) => void
 ): Unsubscribe {
+  if (getQuotaExceeded()) {
+    onUpdate([]);
+    return () => {};
+  }
+
   const colRef = collection(db, DEVICES_COLLECTION);
   return onSnapshot(
     colRef,
@@ -223,6 +258,9 @@ export function subscribeToAllDevices(
       onUpdate(list);
     },
     (err) => {
+      if (isQuotaExceededError(err)) {
+        setQuotaExceeded(true);
+      }
       console.warn('All devices listener notice:', err);
       if (onError) onError(err);
     }
@@ -233,6 +271,14 @@ export function subscribeToAllDevices(
  * Approve a device (Admin action)
  */
 export async function approveDevice(deviceId: string, adminEmail: string = ADMIN_EMAIL): Promise<void> {
+  // Always mark approved locally first for instant offline responsiveness
+  localStorage.setItem(`${LOCAL_DEVICE_APPROVED_PREFIX}${deviceId}`, 'true');
+
+  if (getQuotaExceeded()) {
+    console.warn('Device approved locally (Firestore quota limit active).');
+    return;
+  }
+
   const docRef = doc(db, DEVICES_COLLECTION, deviceId);
   try {
     await updateDoc(docRef, {
@@ -241,6 +287,10 @@ export async function approveDevice(deviceId: string, adminEmail: string = ADMIN
       approvedBy: adminEmail,
     });
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setQuotaExceeded(true);
+      return;
+    }
     // If updateDoc failed because document didn't exist yet, create it
     try {
       await setDoc(
@@ -256,6 +306,10 @@ export async function approveDevice(deviceId: string, adminEmail: string = ADMIN
         { merge: true }
       );
     } catch (e) {
+      if (isQuotaExceededError(e)) {
+        setQuotaExceeded(true);
+        return;
+      }
       handleFirestoreError(e, OperationType.WRITE, `${DEVICES_COLLECTION}/${deviceId}`);
     }
   }
@@ -265,6 +319,9 @@ export async function approveDevice(deviceId: string, adminEmail: string = ADMIN
  * Revoke or reject a device (Admin action)
  */
 export async function rejectDevice(deviceId: string): Promise<void> {
+  localStorage.removeItem(`${LOCAL_DEVICE_APPROVED_PREFIX}${deviceId}`);
+  if (getQuotaExceeded()) return;
+
   const docRef = doc(db, DEVICES_COLLECTION, deviceId);
   try {
     await updateDoc(docRef, {
@@ -273,6 +330,10 @@ export async function rejectDevice(deviceId: string): Promise<void> {
       approvedBy: null,
     });
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setQuotaExceeded(true);
+      return;
+    }
     handleFirestoreError(error, OperationType.WRITE, `${DEVICES_COLLECTION}/${deviceId}`);
   }
 }
@@ -281,10 +342,17 @@ export async function rejectDevice(deviceId: string): Promise<void> {
  * Delete a device record permanently (Admin action)
  */
 export async function deleteDeviceRecord(deviceId: string): Promise<void> {
+  localStorage.removeItem(`${LOCAL_DEVICE_APPROVED_PREFIX}${deviceId}`);
+  if (getQuotaExceeded()) return;
+
   const docRef = doc(db, DEVICES_COLLECTION, deviceId);
   try {
     await deleteDoc(docRef);
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setQuotaExceeded(true);
+      return;
+    }
     handleFirestoreError(error, OperationType.DELETE, `${DEVICES_COLLECTION}/${deviceId}`);
   }
 }

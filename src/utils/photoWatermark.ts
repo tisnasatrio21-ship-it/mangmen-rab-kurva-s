@@ -100,8 +100,8 @@ export async function applyWatermarkToImage(
     srcHeight = imageSource.height;
   }
 
-  // Max dimension limit for performance & storage optimization (e.g. 1280px width)
-  const maxDimension = 1280;
+  // Max dimension limit for performance & storage optimization (800px max width/height for compact ~50-70KB size)
+  const maxDimension = 800;
   let targetWidth = srcWidth;
   let targetHeight = srcHeight;
 
@@ -121,11 +121,11 @@ export async function applyWatermarkToImage(
   // Draw base image
   ctx.drawImage(imageSource, 0, 0, targetWidth, targetHeight);
 
-  // Dynamic sizing based on canvas scale
-  const scale = targetWidth / 1000;
-  const baseFontSize = Math.max(12, Math.round(14 * scale));
-  const smallFontSize = Math.max(10, Math.round(11 * scale));
-  const padding = Math.max(12, Math.round(16 * scale));
+  // Dynamic sizing based on canvas scale (800 base)
+  const scale = Math.max(0.75, targetWidth / 800);
+  const baseFontSize = Math.max(11, Math.round(13 * scale));
+  const smallFontSize = Math.max(9, Math.round(10.5 * scale));
+  const padding = Math.max(10, Math.round(12 * scale));
 
   // Prepare text content
   const timestampStr = formatTimestamp(options.customDate || new Date());
@@ -261,8 +261,118 @@ export async function applyWatermarkToImage(
   ctx.fillText(wmText, wmX + wmPaddingX, wmY + wmBoxHeight - wmPaddingY * 0.9);
   ctx.restore();
 
-  // 3. Compress and Return Data URL (JPEG Quality 0.82 for sharp detail and compact ~200KB file size)
-  return canvas.toDataURL('image/jpeg', 0.82);
+  // 3. Compress and Return Data URL (JPEG Quality 0.65 for sharp detail and compact ~50-70KB file size)
+  let result = canvas.toDataURL('image/jpeg', 0.65);
+  if (result.length > 115000) {
+    // If still large, compress slightly more to stay under ~70KB
+    result = canvas.toDataURL('image/jpeg', 0.55);
+  }
+  return result;
+}
+
+/**
+ * Compresses an arbitrary image data URL so it never exceeds targetMaxChars (default ~90KB)
+ */
+export async function compressDataUrl(
+  dataUrl: string,
+  maxWidth = 800,
+  targetMaxChars = 90000
+): Promise<string> {
+  if (!dataUrl || !dataUrl.startsWith('data:image')) return dataUrl;
+  if (dataUrl.length <= targetMaxChars) return dataUrl;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.naturalWidth || img.width;
+      let h = img.naturalHeight || img.height;
+      if (w > maxWidth || h > maxWidth) {
+        if (w >= h) {
+          h = Math.round((h * maxWidth) / w);
+          w = maxWidth;
+        } else {
+          w = Math.round((w * maxWidth) / h);
+          h = maxWidth;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      let res = canvas.toDataURL('image/jpeg', 0.62);
+      if (res.length > targetMaxChars) {
+        res = canvas.toDataURL('image/jpeg', 0.5);
+      }
+      resolve(res);
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Optimizes all photos in a project to ensure it fits safely inside
+ * Firestore's 1MB document limit and browser's LocalStorage.
+ */
+export async function optimizeProjectPhotos(project: any): Promise<{ project: any; didCompress: boolean }> {
+  if (!project || !Array.isArray(project.dailyReports) || project.dailyReports.length === 0) {
+    return { project, didCompress: false };
+  }
+
+  let didCompress = false;
+  const updatedReports = await Promise.all(
+    project.dailyReports.map(async (report: any) => {
+      let updatedReport = { ...report };
+      let reportChanged = false;
+
+      // Check photoUrl
+      if (report.photoUrl && report.photoUrl.startsWith('data:image') && report.photoUrl.length > 90000) {
+        const compressed = await compressDataUrl(report.photoUrl);
+        if (compressed !== report.photoUrl) {
+          updatedReport.photoUrl = compressed;
+          reportChanged = true;
+          didCompress = true;
+        }
+      }
+
+      // Check photoUrls array
+      if (Array.isArray(report.photoUrls) && report.photoUrls.length > 0) {
+        const compressedUrls = await Promise.all(
+          report.photoUrls.map(async (url: string) => {
+            if (url && url.startsWith('data:image') && url.length > 90000) {
+              const comp = await compressDataUrl(url);
+              if (comp !== url) didCompress = true;
+              return comp;
+            }
+            return url;
+          })
+        );
+        updatedReport.photoUrls = compressedUrls;
+        if (!updatedReport.photoUrl && compressedUrls[0]) {
+          updatedReport.photoUrl = compressedUrls[0];
+        }
+      }
+
+      return updatedReport;
+    })
+  );
+
+  if (didCompress) {
+    return {
+      project: {
+        ...project,
+        dailyReports: updatedReports,
+      },
+      didCompress: true,
+    };
+  }
+
+  return { project, didCompress: false };
 }
 
 /**

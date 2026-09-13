@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { formatIDR } from '../utils/calculator';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getStorageEstimate } from '../utils/indexedDbStorage';
 
 interface BackupExportModalProps {
   isOpen: boolean;
@@ -46,7 +47,14 @@ export const BackupExportModal: React.FC<BackupExportModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [storageInfo, setStorageInfo] = useState<{ usedMB: number; quotaMB: number; percent: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      getStorageEstimate().then(setStorageInfo);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -216,6 +224,28 @@ export const BackupExportModal: React.FC<BackupExportModalProps> = ({
                 <div className="text-right hidden sm:block">
                   <span className="text-[10px] text-slate-400">Total Nilai Kontrak</span>
                   <p className="font-bold text-amber-400">{formatIDR(currentProject.totalContractValue)}</p>
+                </div>
+              </div>
+
+              {/* IndexedDB & Storage Health Card */}
+              <div className="bg-gradient-to-r from-slate-900 to-slate-950 p-3.5 rounded-xl border border-emerald-500/30 flex items-start gap-3 text-xs">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                      Penyimpanan Perangkat (IndexedDB Engine Aktif)
+                    </span>
+                    {storageInfo && (
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {storageInfo.usedMB} MB terpakai / Kuota ~{storageInfo.quotaMB > 1024 ? `${Math.round(storageInfo.quotaMB / 1024)} GB` : `${storageInfo.quotaMB} MB`}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    Sistem kini mendukung proyek durasi panjang (5–12 bulan) dengan ratusan foto dokumentasi lapangan. Data disimpan dalam database lokal berkapasitas Gigabyte tanpa risiko kehabisan kuota browser.
+                  </p>
                 </div>
               </div>
 
