@@ -53,6 +53,7 @@ export interface Project {
   plannedDistributions: PlannedPeriodDistribution[];
   dailyReports: DailyReportItem[];
   lastUpdateDate?: string;
+  updatedAt?: string;
 }
 
 export interface SPoint {

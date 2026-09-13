@@ -15,6 +15,7 @@ import { AiProjectAdvisorModal } from './components/AiProjectAdvisorModal';
 import { generateAutoPlannedDistributions, recalculateRabItems } from './utils/calculator';
 import { optimizeProjectPhotos } from './utils/photoWatermark';
 import { saveProjectsToIDB, loadProjectsFromIDB } from './utils/indexedDbStorage';
+import { mergeProjectLists, stampProjectUpdated } from './utils/projectSync';
 import { useFirebase } from './firebase/FirebaseContext';
 import { getQuotaExceeded } from './firebase/firestoreErrors';
 import { useLanguage } from './i18n/LanguageContext';
@@ -181,6 +182,7 @@ export default function App() {
   // AI Project Advisor Modal State
   const [isAiAdvisorOpen, setIsAiAdvisorOpen] = useState(false);
   const [aiAdvisorInitialTab, setAiAdvisorInitialTab] = useState<'scurve' | 'report' | 'audit' | 'chat'>('scurve');
+  const isIdbHydratedRef = useRef(false);
 
   const handleOpenAiAdvisor = (tab: 'scurve' | 'report' | 'audit' | 'chat' = 'scurve') => {
     setAiAdvisorInitialTab(tab);
@@ -190,32 +192,23 @@ export default function App() {
   // Hydrate projects and full photos from IndexedDB (gigabyte storage capacity)
   useEffect(() => {
     let isMounted = true;
-    loadProjectsFromIDB().then((idbProjects) => {
-      if (isMounted && idbProjects && idbProjects.length > 0) {
-        setProjects((prev) => {
-          // Count total photos to determine if IndexedDB has more data
-          const getPhotoCount = (pList: Project[]) =>
-            pList.reduce(
-              (acc, p) =>
-                acc +
-                (p.dailyReports || []).reduce(
-                  (rAcc, r) => rAcc + (r.photoUrls?.length || (r.photoUrl ? 1 : 0)),
-                  0
-                ),
-              0
-            );
+    loadProjectsFromIDB()
+      .then((idbProjects) => {
+        if (!isMounted) return;
+        isIdbHydratedRef.current = true;
+        if (idbProjects && idbProjects.length > 0) {
+          setProjects((current) => {
+            const merged = mergeProjectLists(current, idbProjects);
+            console.log(`Hydrated ${merged.length} projects from IndexedDB safe storage.`);
+            return merged;
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('IDB hydration notice:', err);
+        isIdbHydratedRef.current = true;
+      });
 
-          const prevPhotos = getPhotoCount(prev);
-          const idbPhotos = getPhotoCount(idbProjects);
-
-          if (idbPhotos >= prevPhotos || idbProjects.length > prev.length) {
-            console.log(`Hydrated ${idbProjects.length} projects with ${idbPhotos} photos from IndexedDB.`);
-            return idbProjects;
-          }
-          return prev;
-        });
-      }
-    });
     return () => {
       isMounted = false;
     };
@@ -253,8 +246,10 @@ export default function App() {
   // 1. IndexedDB: Stores unlimited photos (Gigabytes capacity for 5-month+ projects).
   // 2. LocalStorage: Fast synchronous cache (with graceful fallback if >5MB).
   useEffect(() => {
-    // Save to IndexedDB (asynchronous, supports hundreds of MBs/GBs of photos)
-    saveProjectsToIDB(projects).catch((err) => console.warn('IndexedDB save notice:', err));
+    // Only save to IndexedDB once initial hydration is complete so we never overwrite IndexedDB with unhydrated state
+    if (isIdbHydratedRef.current) {
+      saveProjectsToIDB(projects).catch((err) => console.warn('IndexedDB save notice:', err));
+    }
 
     // Save to LocalStorage
     try {
@@ -284,14 +279,18 @@ export default function App() {
     }
   }, [projects, activeProjectId]);
 
-  // Sync Firestore Cloud Projects into local state when user logs in
+  // Sync Firestore Cloud Projects into local state without clobbering local edits or photos
   useEffect(() => {
     if (user) {
       if (cloudProjects && cloudProjects.length > 0) {
-        setProjects(cloudProjects);
-        if (!cloudProjects.some((p) => p.id === activeProjectId)) {
-          setActiveProjectId(cloudProjects[0].id);
-        }
+        setProjects((current) => {
+          const merged = mergeProjectLists(current, cloudProjects);
+          return merged;
+        });
+        setActiveProjectId((prevId) => {
+          const exists = cloudProjects.some((p) => p.id === prevId);
+          return exists ? prevId : cloudProjects[0].id;
+        });
       } else if (projects.length > 0 && !hasSeededCloudRef.current && !isQuotaExceeded && !getQuotaExceeded()) {
         hasSeededCloudRef.current = true;
         // If user is logged in but cloud has no projects yet, sync current local projects once
@@ -307,11 +306,25 @@ export default function App() {
   // Helper to persist and sync project
   const updateAndSyncProject = useCallback(
     (updatedProject: Project) => {
+      const stamped = stampProjectUpdated(updatedProject);
       setProjects((prev) =>
-        prev.map((p) => (p.id === updatedProject.id ? updatedProject : p))
+        prev.map((p) => (p.id === stamped.id ? stamped : p))
       );
+
+      // Direct asynchronous IndexedDB backup for immediate durability
+      loadProjectsFromIDB()
+        .then((existing) => {
+          const list = existing && existing.length > 0 ? existing : [stamped];
+          const updatedList = list.map((p) => (p.id === stamped.id ? stamped : p));
+          if (!updatedList.some((p) => p.id === stamped.id)) {
+            updatedList.unshift(stamped);
+          }
+          saveProjectsToIDB(updatedList).catch((err) => console.warn('Direct IDB update note:', err));
+        })
+        .catch(() => {});
+
       if (user && !isQuotaExceeded && !getQuotaExceeded()) {
-        syncProjectToCloud(updatedProject).catch((err) => {
+        syncProjectToCloud(stamped).catch((err) => {
           console.warn('Cloud auto-sync notice:', err);
         });
       }
@@ -430,7 +443,7 @@ export default function App() {
       projectData.totalContractValue || 1500000000
     );
 
-    const newProj: Project = {
+    const newProj: Project = stampProjectUpdated({
       id: `proj-${Date.now()}`,
       name: projectData.name || 'Proyek Baru',
       code: projectData.code || 'PRJ-2026-001',
@@ -449,11 +462,18 @@ export default function App() {
       ),
       dailyReports: [],
       lastUpdateDate: projectData.startDate || '2026-07-01',
-    };
+    });
 
     setProjects((prev) => [newProj, ...prev]);
     setActiveProjectId(newProj.id);
     setActiveTab('rab-import');
+
+    // Immediate backup to IndexedDB
+    loadProjectsFromIDB()
+      .then((existing) => {
+        saveProjectsToIDB([newProj, ...(existing || [])]).catch(() => {});
+      })
+      .catch(() => {});
 
     if (user && !isQuotaExceeded && !getQuotaExceeded()) {
       syncProjectToCloud(newProj).catch((err) =>
@@ -469,11 +489,13 @@ export default function App() {
         'Apakah Anda yakin ingin merefresh demo data ke proyek sampel bawaan?'
       )
     ) {
-      setProjects([sampleProject]);
-      setActiveProjectId(sampleProject.id);
+      const stamped = stampProjectUpdated(sampleProject);
+      setProjects([stamped]);
+      setActiveProjectId(stamped.id);
       setActiveTab('dashboard');
+      saveProjectsToIDB([stamped]).catch(() => {});
       if (user && !isQuotaExceeded && !getQuotaExceeded()) {
-        syncProjectToCloud(sampleProject);
+        syncProjectToCloud(stamped);
       }
     }
   };
@@ -482,19 +504,14 @@ export default function App() {
   const handleImportProjects = (imported: Project[]) => {
     if (!imported || imported.length === 0) return;
 
-    setProjects((prev) => {
-      const existingMap = new Map(prev.map((p) => [p.id, p]));
-      imported.forEach((p) => {
-        existingMap.set(p.id, p);
-      });
-      return Array.from(existingMap.values());
-    });
+    const stampedList = imported.map((p) => stampProjectUpdated(p));
+    setProjects((prev) => mergeProjectLists(prev, stampedList));
 
-    setActiveProjectId(imported[0].id);
+    setActiveProjectId(stampedList[0].id);
     setActiveTab('dashboard');
 
     if (user && !isQuotaExceeded && !getQuotaExceeded()) {
-      imported.forEach((proj) => {
+      stampedList.forEach((proj) => {
         syncProjectToCloud(proj).catch((err) => {
           console.error('Failed to sync restored project to cloud:', err);
         });

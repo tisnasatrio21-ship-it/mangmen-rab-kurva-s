@@ -44,6 +44,7 @@ export async function fetchProjectsFromFirestore(): Promise<Project[]> {
         plannedDistributions: Array.isArray(data.plannedDistributions) ? data.plannedDistributions : [],
         dailyReports: Array.isArray(data.dailyReports) ? data.dailyReports : [],
         lastUpdateDate: data.lastUpdateDate || '',
+        updatedAt: data.updatedAt || '',
       });
     });
     return projects;
@@ -86,7 +87,7 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
       plannedDistributions: project.plannedDistributions || [],
       dailyReports: project.dailyReports || [],
       lastUpdateDate: project.lastUpdateDate || new Date().toISOString().split('T')[0],
-      updatedAt: new Date().toISOString(),
+      updatedAt: project.updatedAt || new Date().toISOString(),
     };
 
     // Calculate approximate payload size to avoid hitting Firestore's strict 1,048,576 bytes (1MB) limit
@@ -153,7 +154,7 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
           plannedDistributions: project.plannedDistributions || [],
           dailyReports: strippedReports,
           lastUpdateDate: project.lastUpdateDate || new Date().toISOString().split('T')[0],
-          updatedAt: new Date().toISOString(),
+          updatedAt: project.updatedAt || new Date().toISOString(),
         });
         console.log('Project successfully backed up to cloud with local-photo markers.');
         return;
@@ -226,6 +227,7 @@ export function subscribeToProjects(
           plannedDistributions: Array.isArray(data.plannedDistributions) ? data.plannedDistributions : [],
           dailyReports: Array.isArray(data.dailyReports) ? data.dailyReports : [],
           lastUpdateDate: data.lastUpdateDate || '',
+          updatedAt: data.updatedAt || '',
         });
       });
       onUpdate(projects);

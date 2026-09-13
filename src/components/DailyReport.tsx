@@ -148,6 +148,14 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   const [selectedRabItemId, setSelectedRabItemId] = useState<string>(
     project.rabItems[0]?.id || ''
   );
+
+  useEffect(() => {
+    if (project.rabItems && project.rabItems.length > 0) {
+      if (!project.rabItems.some((i) => i.id === selectedRabItemId)) {
+        setSelectedRabItemId(project.rabItems[0].id);
+      }
+    }
+  }, [project.id, project.rabItems, selectedRabItemId]);
   const [volumeInput, setVolumeInput] = useState<number>(0);
   const [notesInput, setNotesInput] = useState<string>('');
   const [reporterInput, setReporterInput] = useState<string>('Site Inspector');
