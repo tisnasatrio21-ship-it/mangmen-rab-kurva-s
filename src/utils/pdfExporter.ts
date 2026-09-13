@@ -475,23 +475,35 @@ export async function generateProjectPdfReport(
       doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
       doc.rect(14, currentY, 3, cardH, 'F');
 
-      // Header of report item
+      // Header of report item (Split to avoid overlap with long descriptions)
+      const textColW = hasPhoto ? 88 : 170;
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
-      doc.text(`Tgl: ${report.date} (Minggu ke-${report.periodNumber}) • [${report.rabItemCode || 'RAB'}] ${report.rabItemDescription}`, 21, currentY + 6);
+      const itemTitle = `Tgl: ${report.date} (Minggu ke-${report.periodNumber}) • [${report.rabItemCode || 'RAB'}] ${report.rabItemDescription}`;
+      const titleLines = doc.splitTextToSize(itemTitle, textColW);
+      const displayTitleLines = titleLines.slice(0, 2);
+      
+      let cursorY = currentY + 6;
+      doc.text(displayTitleLines, 21, cursorY);
+      cursorY += displayTitleLines.length * 4.2 + 1;
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.setTextColor(100, 116, 139);
-      doc.text(`Pelapor / Inspector: ${report.reporterName || 'Site Staff'} | Penambahan Volume: ${report.volumeProgress} unit (+${formatPercent(report.weightAdded)} Bobot)`, 21, currentY + 11);
+      const subInfo = `Pelapor: ${report.reporterName || 'Site Staff'} | Vol: ${report.volumeProgress} unit (+${formatPercent(report.weightAdded)})`;
+      const subInfoLines = doc.splitTextToSize(subInfo, textColW);
+      doc.text(subInfoLines.slice(0, 1), 21, cursorY);
+      cursorY += 4.5;
 
       // Notes
       doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7.5);
       doc.setTextColor(51, 65, 85);
       const safeNotes = report.notes ? `"${report.notes}"` : 'Tidak ada catatan khusus.';
-      const splitNotes = doc.splitTextToSize(safeNotes, hasPhoto ? 88 : 170);
-      doc.text(splitNotes, 21, currentY + 17);
+      const splitNotes = doc.splitTextToSize(safeNotes, textColW);
+      const remainingLines = Math.max(1, Math.floor((currentY + cardH - 5 - cursorY) / 3.8));
+      doc.text(splitNotes.slice(0, remainingLines), 21, cursorY);
 
       // Render Photo if exists
       if (hasPhoto && photos[0]) {
@@ -613,64 +625,113 @@ export async function generateDailyReportPdf(
 
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
+  doc.setFontSize(12);
   doc.text('LEMBAR LAPORAN HARIAN & DOKUMENTASI INSPEKSI FISIK', 14, 13);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.text(`Proyek: ${project.name} (${project.code}) • Tanggal: ${dailyReport.date}`, 14, 19);
 
-  let currentY = 32;
+  let currentY = 30;
 
-  // Metadata Card
+  // 1. Metadata Card (Item Pekerjaan & Detail Progres)
+  // Dynamic Height calculation to eliminate ANY text overlap even on very long item descriptions
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  const rawTitle = `ITEM PEKERJAAN: [${dailyReport.rabItemCode || 'RAB'}] ${dailyReport.rabItemDescription}`;
+  const titleLines: string[] = doc.splitTextToSize(rawTitle, 172);
+  const titleLineH = 4.6;
+  const titleBlockH = titleLines.length * titleLineH;
+
+  // Info Grid: 3 rows with 5.2mm spacing
+  const infoRowH = 5.2;
+  const infoBlockH = 3 * infoRowH;
+
+  const metaCardPaddingTop = 6;
+  const metaCardPaddingBottom = 5;
+  const metaCardHeight = metaCardPaddingTop + titleBlockH + 3 + infoBlockH + metaCardPaddingBottom;
+
+  // Card Background & Border
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(14, currentY, 182, 36, 2, 2, 'F');
+  doc.roundedRect(14, currentY, 182, metaCardHeight, 2, 2, 'F');
   doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(14, currentY, 182, 36, 2, 2, 'D');
+  doc.roundedRect(14, currentY, 182, metaCardHeight, 2, 2, 'D');
 
+  // Left Amber Accent Strip
+  doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+  doc.rect(14, currentY, 3, metaCardHeight, 'F');
+
+  // Title Lines (navy bold)
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
-  doc.text(`ITEM PEKERJAAN: [${dailyReport.rabItemCode || 'RAB'}] ${dailyReport.rabItemDescription}`, 18, currentY + 8);
+  const titleStartY = currentY + metaCardPaddingTop;
+  for (let i = 0; i < titleLines.length; i++) {
+    doc.text(titleLines[i], 20, titleStartY + (i * titleLineH));
+  }
 
+  // Divider line below title
+  const dividerY = titleStartY + titleBlockH + 1.5;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(20, dividerY, 192, dividerY);
+
+  // 2-Column Info Grid strictly below title & divider
+  const infoStartY = dividerY + 4.5;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(51, 65, 85);
-  doc.text(`Tanggal Laporan : ${dailyReport.date} (Minggu ke-${dailyReport.periodNumber})`, 18, currentY + 16);
-  doc.text(`Pelapor/Inspector: ${dailyReport.reporterName || 'Site Staff'}`, 18, currentY + 22);
-  doc.text(`Lokasi Proyek   : ${project.location}`, 18, currentY + 28);
 
-  doc.text(`Penambahan Volume: ${dailyReport.volumeProgress} unit`, 110, currentY + 16);
-  doc.text(`Penambahan Bobot : +${formatPercent(dailyReport.weightAdded)}`, 110, currentY + 22);
-  doc.text(`Klien / Owner    : ${project.client}`, 110, currentY + 28);
+  // Row 1
+  doc.text(`Tanggal Laporan : ${dailyReport.date} (Minggu ke-${dailyReport.periodNumber})`, 20, infoStartY);
+  doc.text(`Penambahan Volume: ${dailyReport.volumeProgress} unit`, 110, infoStartY);
 
-  currentY += 42;
+  // Row 2
+  doc.text(`Pelapor/Inspector: ${dailyReport.reporterName || 'Site Staff'}`, 20, infoStartY + infoRowH);
+  doc.text(`Penambahan Bobot : +${formatPercent(dailyReport.weightAdded)}`, 110, infoStartY + infoRowH);
 
-  // Notes Block
+  // Row 3
+  doc.text(`Lokasi Proyek   : ${project.location || '-'}`, 20, infoStartY + (2 * infoRowH));
+  doc.text(`Klien / Owner    : ${project.client || '-'}`, 110, infoStartY + (2 * infoRowH));
+
+  // Advance currentY past metadata card
+  currentY += metaCardHeight + 3.5;
+
+  // 2. Notes Block (Catatan Lapangan) - Dynamic Height Calculation
+  const rawNotes = dailyReport.notes ? dailyReport.notes.trim() : 'Pekerjaan terlaksana sesuai spesifikasi teknis dan gambar kerja.';
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  const notesLines: string[] = doc.splitTextToSize(rawNotes, 172);
+  const notesLineH = 4.2;
+  const notesTextH = notesLines.length * notesLineH;
+  const notesCardHeight = Math.max(16, 5 + 4 + notesTextH + 3.5);
+
   doc.setFillColor(254, 243, 199);
-  doc.roundedRect(14, currentY, 182, 20, 2, 2, 'F');
+  doc.roundedRect(14, currentY, 182, notesCardHeight, 2, 2, 'F');
   doc.setDrawColor(252, 211, 77);
-  doc.roundedRect(14, currentY, 182, 20, 2, 2, 'D');
+  doc.roundedRect(14, currentY, 182, notesCardHeight, 2, 2, 'D');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(146, 64, 14);
-  doc.text('CATATAN / KENDALA LAPANGAN:', 18, currentY + 6);
+  doc.text('CATATAN / KENDALA LAPANGAN:', 18, currentY + 5);
 
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(51, 65, 85);
-  const notes = dailyReport.notes || 'Pekerjaan terlaksana sesuai spesifikasi teknis dan gambar kerja.';
-  doc.text(notes, 18, currentY + 13, { maxWidth: 172 });
+  const notesStartY = currentY + 9.5;
+  for (let i = 0; i < notesLines.length; i++) {
+    doc.text(notesLines[i], 18, notesStartY + (i * notesLineH));
+  }
 
-  currentY += 26;
+  // Advance currentY past notes card
+  currentY += notesCardHeight + 4;
 
-  // Photo Section
+  // 3. Photo Documentation Section
   const photos = Array.isArray(dailyReport.photoUrls) && dailyReport.photoUrls.length > 0
     ? dailyReport.photoUrls.filter(Boolean)
     : (dailyReport.photoUrl ? [dailyReport.photoUrl] : []);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
+  doc.setFontSize(9.5);
   doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
   const photoSectionTitle = photos.length > 1
     ? `FOTO DOKUMENTASI INSPEKSI (${photos.length} FOTO DENGAN GPS & TIMESTAMP)`
@@ -679,12 +740,15 @@ export async function generateDailyReportPdf(
 
   currentY += 4;
 
+  // Available vertical space for photos on page 1 before sign-off
+  const maxAvailableForPhotos = Math.max(45, 248 - currentY);
+
   if (photos.length === 1) {
     try {
       const imgObj = await loadImg(photos[0]);
       if (imgObj) {
         const photoBoxW = 182;
-        const photoBoxH = 115;
+        const photoBoxH = Math.min(105, Math.max(65, maxAvailableForPhotos - 8));
         
         doc.setFillColor(15, 23, 42);
         doc.roundedRect(14, currentY, photoBoxW, photoBoxH, 2, 2, 'F');
@@ -692,30 +756,34 @@ export async function generateDailyReportPdf(
 
         currentY += photoBoxH + 4;
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7.5);
+        doc.setFontSize(7);
         doc.setTextColor(amberColor[0], amberColor[1], amberColor[2]);
         doc.text('✓ Foto Lapangan Autentik dengan GPS & Timestamp Watermark (app by Tisna)', 14, currentY);
+        currentY += 2;
       }
     } catch (err) {
       console.warn('Failed to load daily report photo:', err);
     }
   } else if (photos.length >= 2) {
     try {
-      const maxDisplay = Math.min(photos.length, 4);
-      const isFour = maxDisplay >= 3;
+      const maxDisplayPage1 = Math.min(photos.length, 4);
+      const isFour = maxDisplayPage1 >= 3;
       const boxW = 89;
-      const boxH = isFour ? 55 : 68;
+      const numRows = isFour ? 2 : 1;
+      const targetBoxH = isFour
+        ? Math.min(48, Math.max(38, Math.floor((maxAvailableForPhotos - 14) / 2)))
+        : Math.min(68, Math.max(48, maxAvailableForPhotos - 10));
       
-      for (let pIdx = 0; pIdx < maxDisplay; pIdx++) {
+      for (let pIdx = 0; pIdx < maxDisplayPage1; pIdx++) {
         const col = pIdx % 2;
         const row = Math.floor(pIdx / 2);
         const pX = 14 + col * (boxW + 4);
-        const pY = currentY + row * (boxH + 5);
+        const pY = currentY + row * (targetBoxH + 5.5);
         
         doc.setFillColor(15, 23, 42);
-        doc.roundedRect(pX, pY, boxW, boxH, 1.5, 1.5, 'F');
+        doc.roundedRect(pX, pY, boxW, targetBoxH, 1.5, 1.5, 'F');
         try {
-          doc.addImage(photos[pIdx], 'JPEG', pX + 0.5, pY + 0.5, boxW - 1, boxH - 1);
+          doc.addImage(photos[pIdx], 'JPEG', pX + 0.5, pY + 0.5, boxW - 1, targetBoxH - 1);
         } catch (e) {
           console.warn('Failed rendering sub photo:', e);
         }
@@ -724,69 +792,134 @@ export async function generateDailyReportPdf(
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(6);
         doc.setTextColor(amberColor[0], amberColor[1], amberColor[2]);
-        doc.text(`Foto #${pIdx + 1} GPS & Watermark (app by Tisna)`, pX + 1, pY + boxH + 3.5);
+        doc.text(`Foto #${pIdx + 1} GPS & Watermark (app by Tisna)`, pX + 1, pY + targetBoxH + 3.5);
       }
       
-      const totalRows = Math.ceil(maxDisplay / 2);
-      currentY += totalRows * (boxH + 5) + 3;
+      currentY += numRows * (targetBoxH + 5.5) + 1;
       
       if (photos.length > 4) {
         doc.setFont('helvetica', 'italic');
-        doc.setFontSize(7);
+        doc.setFontSize(6.5);
         doc.setTextColor(100, 116, 139);
-        doc.text(`* Menampilkan 4 dari total ${photos.length} foto dokumentasi inspeksi.`, 14, currentY);
-        currentY += 4;
+        doc.text(`* 4 foto ditampilkan di Lembar Utama, ${photos.length - 4} foto lainnya terlampir di Halaman Lanjutan.`, 14, currentY);
+        currentY += 3.5;
       }
     } catch (err) {
       console.warn('Failed to render multi-photo grid:', err);
     }
   } else {
     doc.setFillColor(241, 245, 249);
-    doc.roundedRect(14, currentY, 182, 40, 2, 2, 'F');
+    doc.roundedRect(14, currentY, 182, 26, 2, 2, 'F');
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
+    doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
-    doc.text('Tidak ada lampiran foto untuk laporan harian ini.', 105, currentY + 22, { align: 'center' });
-    currentY += 45;
+    doc.text('Tidak ada lampiran foto untuk laporan harian ini.', 105, currentY + 14, { align: 'center' });
+    currentY += 30;
   }
 
-  // Sign-off
-  currentY = 240;
+  // 4. Sign-off Section (Placed safely below photos, never overlapping)
+  let signoffY = Math.max(currentY + 4, 252);
+  if (signoffY > 256) {
+    doc.addPage();
+    doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+    doc.rect(0, 0, 210, 12, 'F');
+    doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+    doc.rect(0, 12, 210, 1.5, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(`LEMBAR PENGESAHAN & TANDA TANGAN INSPEKSI - ${project.name}`, 14, 8);
+    signoffY = 22;
+  }
+
   doc.setDrawColor(203, 213, 225);
-  doc.line(14, currentY, 196, currentY);
-  currentY += 6;
+  doc.line(14, signoffY, 196, signoffY);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
-  doc.text('TANDA TANGAN & PERSETUJUAN INSPEKSI:', 14, currentY);
-
-  currentY += 8;
-  const colW = 55;
-
   doc.setFontSize(8);
-  doc.text('Pelapor / Mandor Lapangan:', 14, currentY);
-  doc.setFont('helvetica', 'normal');
-  doc.text(dailyReport.reporterName || 'Site Staff', 14, currentY + 4);
-  doc.line(14, currentY + 18, 14 + colW, currentY + 18);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text('TANDA TANGAN & PERSETUJUAN INSPEKSI:', 14, signoffY + 5);
 
-  doc.setFont('helvetica', 'bold');
-  doc.text('Konsultan Pengawas / MK:', 80, currentY);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Tim Supervisi Lapangan', 80, currentY + 4);
-  doc.line(80, currentY + 18, 80 + colW, currentY + 18);
+  const sigColW = 55;
+  const sigTextY = signoffY + 9;
 
-  doc.setFont('helvetica', 'bold');
-  doc.text('Project Manager / Kontraktor:', 142, currentY);
-  doc.setFont('helvetica', 'normal');
-  doc.text(project.contractor || 'Kontraktor', 142, currentY + 4);
-  doc.line(142, currentY + 18, 142 + colW, currentY + 18);
-
-  // Footer
-  doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
+  doc.text('Pelapor / Mandor Lapangan:', 14, sigTextY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(dailyReport.reporterName || 'Site Staff', 14, sigTextY + 3.5);
+  doc.line(14, sigTextY + 16, 14 + sigColW, sigTextY + 16);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Konsultan Pengawas / MK:', 80, sigTextY);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Tim Supervisi Lapangan', 80, sigTextY + 3.5);
+  doc.line(80, sigTextY + 16, 80 + sigColW, sigTextY + 16);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Project Manager / Kontraktor:', 142, sigTextY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(project.contractor || 'Kontraktor', 142, sigTextY + 3.5);
+  doc.line(142, sigTextY + 16, 142 + sigColW, sigTextY + 16);
+
+  // Footer on Page 1
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
   doc.setTextColor(148, 163, 184);
   doc.text(`Lembar Laporan Harian • ${project.name} • Dicetak: ${new Date().toLocaleString('id-ID')}`, 105, 288, { align: 'center' });
+
+  // 5. If more than 4 photos exist, append Page 2 for Remaining Photos
+  if (photos.length > 4) {
+    doc.addPage();
+    doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+    doc.rect(0, 0, 210, 14, 'F');
+    doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+    doc.rect(0, 14, 210, 1.5, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.text(`LAMPIRAN DOKUMENTASI FOTO INSPEKSI (LANJUTAN)`, 14, 9.5);
+
+    let page2Y = 22;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+    doc.text(`FOTO DOKUMENTASI TAMBAHAN (${photos.length - 4} FOTO)`, 14, page2Y);
+    page2Y += 5;
+
+    const remainingPhotos = photos.slice(4);
+    const boxW = 89;
+    const boxH = 55;
+
+    for (let rIdx = 0; rIdx < remainingPhotos.length; rIdx++) {
+      const col = rIdx % 2;
+      const row = Math.floor(rIdx / 2);
+      const pX = 14 + col * (boxW + 4);
+      const pY = page2Y + row * (boxH + 6);
+
+      if (pY + boxH > 275) {
+        doc.addPage();
+        page2Y = 20;
+      }
+
+      doc.setFillColor(15, 23, 42);
+      doc.roundedRect(pX, pY, boxW, boxH, 1.5, 1.5, 'F');
+      try {
+        doc.addImage(remainingPhotos[rIdx], 'JPEG', pX + 0.5, pY + 0.5, boxW - 1, boxH - 1);
+      } catch (e) {
+        console.warn('Failed rendering additional photo:', e);
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6);
+      doc.setTextColor(amberColor[0], amberColor[1], amberColor[2]);
+      doc.text(`Foto #${rIdx + 5} GPS & Watermark (app by Tisna)`, pX + 1, pY + boxH + 3.5);
+    }
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Lampiran Tambahan • ${project.name} • ${dailyReport.date}`, 105, 288, { align: 'center' });
+  }
 
   doc.save(`Laporan_Harian_${dailyReport.date}_${project.code}.pdf`);
 }
