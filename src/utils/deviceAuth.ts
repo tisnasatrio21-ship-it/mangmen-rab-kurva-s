@@ -15,12 +15,41 @@ import { handleFirestoreError, OperationType, getQuotaExceeded, setQuotaExceeded
 
 export const ADMIN_PHONE_NUMBER = '6281315762352'; // Pak Tisna WhatsApp
 export const ADMIN_EMAIL = 'tisnasatrio21@gmail.com'; // Master Admin Email
+export const MASTER_ADMIN_PIN = '170845'; // Pak Tisna Secret PIN for instant bypass on any device
 const DEVICES_COLLECTION = 'authorized_devices';
 
 const LOCAL_DEVICE_ID_KEY = 'tisna_rab_device_id';
 const LOCAL_DEVICE_NAME_KEY = 'tisna_rab_device_name';
 const LOCAL_DEVICE_CREATED_KEY = 'tisna_rab_device_created';
 const LOCAL_DEVICE_APPROVED_PREFIX = 'tisna_device_approved_';
+const LOCAL_ADMIN_PIN_KEY = 'tisna_master_pin_unlocked';
+
+/**
+ * Validate and verify Pak Tisna's master PIN (170845)
+ */
+export function verifyMasterAdminPin(enteredPin: string, deviceId: string): boolean {
+  if (!enteredPin) return false;
+  if (enteredPin.trim() === MASTER_ADMIN_PIN) {
+    // Persist approval on this device instantly
+    localStorage.setItem(`${LOCAL_DEVICE_APPROVED_PREFIX}${deviceId}`, 'true');
+    localStorage.setItem(LOCAL_ADMIN_PIN_KEY, 'true');
+    // Also mark in Firestore asynchronously if possible
+    approveDevice(deviceId, `PIN Pemilik (${ADMIN_EMAIL})`).catch((err) => {
+      console.warn('Notice syncing PIN approval to cloud:', err);
+    });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if this device has already been unlocked via PIN
+ */
+export function isDeviceUnlockedByPin(deviceId: string): boolean {
+  const isApproved = localStorage.getItem(`${LOCAL_DEVICE_APPROVED_PREFIX}${deviceId}`) === 'true';
+  const isPinUnlocked = localStorage.getItem(LOCAL_ADMIN_PIN_KEY) === 'true';
+  return isApproved && isPinUnlocked;
+}
 
 /**
  * Detect client OS, browser, and device model in human-readable Indonesian

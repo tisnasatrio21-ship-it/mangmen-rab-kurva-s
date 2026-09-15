@@ -25,6 +25,7 @@ import {
   subscribeToDeviceStatus,
   approveDevice,
   isUserMasterAdmin,
+  isDeviceUnlockedByPin,
   ADMIN_EMAIL,
 } from './utils/deviceAuth';
 import {
@@ -523,8 +524,10 @@ export default function App() {
   // Allowed if:
   // 1. User is Master Admin (tisnasatrio21@gmail.com)
   // 2. Or currentDevice.status is 'approved'
+  // 3. Or this device is unlocked via Pak Tisna's PIN (170845)
   const isMasterAdminUser = isUserMasterAdmin(user?.email);
-  const isDeviceAuthorized = isMasterAdminUser || currentDevice.status === 'approved';
+  const isPinUnlocked = isDeviceUnlockedByPin(currentDevice.id);
+  const isDeviceAuthorized = isMasterAdminUser || currentDevice.status === 'approved' || isPinUnlocked;
 
   // If device is NOT authorized yet, show the full WhatsApp Device Lock Screen
   if (!isDeviceAuthorized) {
@@ -536,6 +539,13 @@ export default function App() {
         onRefreshStatus={async () => {
           const registered = await registerDeviceInFirestore(deviceInfo.deviceId, deviceInfo.deviceName);
           setCurrentDevice(registered);
+        }}
+        onUnlockWithPin={() => {
+          setCurrentDevice((prev) => ({
+            ...prev,
+            status: 'approved',
+            approvedBy: `PIN Pemilik (${ADMIN_EMAIL})`,
+          }));
         }}
       />
     );

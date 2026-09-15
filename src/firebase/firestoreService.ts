@@ -15,6 +15,27 @@ import { Project } from '../types/project';
 const PROJECTS_COLLECTION = 'projects';
 
 /**
+ * Deep-clean an object to remove any `undefined` values that break Firestore
+ */
+function sanitizeForFirestore(obj: any): any {
+  if (obj === undefined) return null;
+  if (obj === null) return null;
+  if (typeof obj !== 'object') return obj;
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeForFirestore(item));
+  }
+
+  const result: Record<string, any> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) {
+      result[key] = sanitizeForFirestore(val);
+    }
+  }
+  return result;
+}
+
+/**
  * Fetch all projects from Firestore with strict error handling
  */
 export async function fetchProjectsFromFirestore(): Promise<Project[]> {
@@ -121,7 +142,9 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
       projectData = { ...projectData, dailyReports: lightReports };
     }
 
-    await setDoc(doc(db, PROJECTS_COLLECTION, project.id), projectData);
+    // Sanitize data completely so no undefined properties trigger Firestore validation failures
+    const cleanPayload = sanitizeForFirestore(projectData);
+    await setDoc(doc(db, PROJECTS_COLLECTION, project.id), cleanPayload);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     if (
@@ -137,7 +160,7 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
           photoUrls: [],
           hasLocalPhotosOnly: true,
         }));
-        await setDoc(doc(db, PROJECTS_COLLECTION, project.id), {
+        const strippedPayload = sanitizeForFirestore({
           id: project.id,
           name: project.name,
           code: project.code,
@@ -156,6 +179,7 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
           lastUpdateDate: project.lastUpdateDate || new Date().toISOString().split('T')[0],
           updatedAt: project.updatedAt || new Date().toISOString(),
         });
+        await setDoc(doc(db, PROJECTS_COLLECTION, project.id), strippedPayload);
         console.log('Project successfully backed up to cloud with local-photo markers.');
         return;
       } catch (retryErr) {

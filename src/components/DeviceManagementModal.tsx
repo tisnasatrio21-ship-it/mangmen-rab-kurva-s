@@ -26,6 +26,7 @@ import {
   deleteDeviceRecord,
   ADMIN_PHONE_NUMBER,
   ADMIN_EMAIL,
+  MASTER_ADMIN_PIN,
   generateWhatsAppApprovalLink,
 } from '../utils/deviceAuth';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -176,13 +177,15 @@ export const DeviceManagementModal: React.FC<DeviceManagementModalProps> = ({
         {/* WhatsApp & Admin Info Box */}
         <div className="px-5 py-2.5 bg-slate-950/40 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 flex-wrap gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-[11px]">Nomor WhatsApp Admin:</span>
+            <span className="text-[11px]">WhatsApp Admin:</span>
             <span className="font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
               +62 813-1576-2352
             </span>
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-            <span>Admin: <strong>{ADMIN_EMAIL}</strong></span>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="text-slate-400">PIN Pemilik: <strong className="text-amber-400 font-mono tracking-widest">{MASTER_ADMIN_PIN}</strong></span>
+            <span className="text-slate-500">|</span>
+            <span>Admin: <strong className="text-slate-200">{ADMIN_EMAIL}</strong></span>
           </div>
         </div>
 

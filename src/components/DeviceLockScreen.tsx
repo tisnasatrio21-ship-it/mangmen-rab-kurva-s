@@ -15,12 +15,16 @@ import {
   Loader2,
   RefreshCw,
   Languages,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { AuthorizedDevice } from '../types/project';
 import {
   ADMIN_PHONE_NUMBER,
   ADMIN_EMAIL,
   generateWhatsAppApprovalLink,
+  verifyMasterAdminPin,
 } from '../utils/deviceAuth';
 import { useLanguage } from '../i18n/LanguageContext';
 
@@ -29,6 +33,7 @@ interface DeviceLockScreenProps {
   onAdminLogin: () => Promise<void>;
   isLoadingAuth: boolean;
   onRefreshStatus: () => void;
+  onUnlockWithPin?: () => void;
 }
 
 export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
@@ -36,10 +41,35 @@ export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
   onAdminLogin,
   isLoadingAuth,
   onRefreshStatus,
+  onUnlockWithPin,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [showPin, setShowPin] = useState(false);
+  const [pinError, setPinError] = useState(false);
+  const [pinSuccess, setPinSuccess] = useState(false);
   const { language, setLanguage, t } = useLanguage();
+
+  const handlePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinInput) return;
+    const isValid = verifyMasterAdminPin(pinInput, currentDevice.id);
+    if (isValid) {
+      setPinError(false);
+      setPinSuccess(true);
+      setTimeout(() => {
+        if (onUnlockWithPin) {
+          onUnlockWithPin();
+        } else {
+          window.location.reload();
+        }
+      }, 500);
+    } else {
+      setPinError(true);
+      setTimeout(() => setPinError(false), 3000);
+    }
+  };
 
   const toggleLanguage = () => {
     setLanguage(language === 'id' ? 'en' : 'id');
@@ -199,29 +229,85 @@ export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
           {/* Divider */}
           <div className="relative flex py-1 items-center">
             <div className="flex-grow border-t border-slate-800"></div>
-            <span className="flex-shrink mx-3 text-slate-500 text-[10px] uppercase font-bold tracking-wider">
-              Khusus Pemilik Aplikasi
+            <span className="flex-shrink mx-3 text-slate-400 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1">
+              <KeyRound className="w-3 h-3 text-amber-400" />
+              <span>Khusus Pemilik Aplikasi (Pak Tisna)</span>
             </span>
             <div className="flex-grow border-t border-slate-800"></div>
           </div>
 
-          {/* Admin Bypass Sign-in Button */}
+          {/* Opsi 1: Masuk Instan Dengan PIN Rahasia Pemilik */}
+          <div className="bg-slate-950/90 rounded-xl p-3.5 border border-amber-500/30 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Masuk Instan dengan PIN Pemilik</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">Tanpa Pop-up Gmail</span>
+            </div>
+            
+            <form onSubmit={handlePinSubmit} className="space-y-2">
+              <div className="relative">
+                <input
+                  type={showPin ? 'text' : 'password'}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value)}
+                  placeholder="Ketik 6 angka PIN Pemilik..."
+                  className="w-full pl-3 pr-10 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white font-mono tracking-widest placeholder:tracking-normal placeholder:text-xs placeholder:text-slate-500 focus:outline-none focus:border-amber-500 transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPin(!showPin)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                >
+                  {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {pinError && (
+                <p className="text-[11px] text-rose-400 font-medium animate-fadeIn">
+                  ❌ PIN salah. Silakan masukkan PIN pemilik yang benar.
+                </p>
+              )}
+
+              {pinSuccess && (
+                <p className="text-[11px] text-emerald-400 font-bold flex items-center gap-1 animate-fadeIn">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>PIN Benar! Membuka kunci aplikasi...</span>
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={pinInput.length < 4 || pinSuccess}
+                className="w-full py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-black text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-amber-950/50"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-slate-950" />
+                <span>Buka Kunci Sekarang</span>
+              </button>
+            </form>
+            <p className="text-[10px] text-slate-500 text-center">
+              Cocok saat ganti HP atau browser memblokir pop-up akun Google.
+            </p>
+          </div>
+
+          {/* Opsi 2: Login Google Akun Pak Tisna */}
           <div>
             <button
               onClick={onAdminLogin}
               disabled={isLoadingAuth}
-              className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-750 active:bg-slate-800 text-slate-200 hover:text-white font-bold text-xs rounded-xl border border-slate-700 hover:border-amber-500/50 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-750 active:bg-slate-800 text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-slate-700 hover:border-amber-500/50 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {isLoadingAuth ? (
-                <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
               ) : (
-                <UserCheck className="w-4 h-4 text-amber-400" />
+                <UserCheck className="w-3.5 h-3.5 text-amber-400" />
               )}
-              <span>Saya adalah Pak Tisna (Login Langsung Google)</span>
+              <span>Opsi Alternatif: Login Akun Google ({ADMIN_EMAIL})</span>
             </button>
-            <p className="text-[10px] text-center text-slate-500 mt-1.5">
-              Login dengan akun <code>{ADMIN_EMAIL}</code> akan otomatis membuka kunci perangkat ini.
-            </p>
           </div>
         </div>
       </div>

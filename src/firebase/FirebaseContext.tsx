@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { User, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from 'firebase/auth';
 import { auth, googleProvider } from './config';
 import {
   saveProjectToFirestore,
@@ -45,8 +45,18 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [cloudProjects, setCloudProjects] = useState<Project[]>([]);
   const hasSubscribedRef = useRef(false);
 
-  // Listen to Auth State
+  // Listen to Auth State and handle redirect auth result
   useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          setUser(result.user);
+        }
+      })
+      .catch((err) => {
+        console.warn('Redirect auth result check note:', err);
+      });
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsLoadingAuth(false);
@@ -94,7 +104,24 @@ export const FirebaseProvider: React.FC<{ children: ReactNode }> = ({ children }
     try {
       setIsLoadingAuth(true);
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
+      // If popup was blocked or failed due to mobile browser iframe/restrictions, fallback to direct redirect
+      const errCode = error?.code || '';
+      if (
+        errCode === 'auth/popup-blocked' ||
+        errCode === 'auth/popup-closed-by-user' ||
+        errCode === 'auth/cancelled-popup-request' ||
+        errCode === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        console.warn('Popup blocked or cancelled, falling back to signInWithRedirect...');
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectErr) {
+          console.error('Redirect sign in also failed:', redirectErr);
+          throw redirectErr;
+        }
+      }
       console.error('Login failed:', error);
       throw error;
     } finally {
