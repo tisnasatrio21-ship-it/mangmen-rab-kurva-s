@@ -316,6 +316,16 @@ export async function compressDataUrl(
 }
 
 /**
+ * Generates an ultra-compact lightweight thumbnail (~10-15KB) specifically for Cloud Firestore sync.
+ * This guarantees that even with dozens of reports, the project document stays well below
+ * Firestore's 1MB limit while still showing a clear photo across any device upon login.
+ */
+export async function generateCloudThumbnail(dataUrl: string): Promise<string> {
+  if (!dataUrl || !dataUrl.startsWith('data:image')) return dataUrl;
+  return compressDataUrl(dataUrl, 320, 18000);
+}
+
+/**
  * Optimizes all photos in a project to ensure it fits safely inside
  * Firestore's 1MB document limit and browser's LocalStorage.
  */

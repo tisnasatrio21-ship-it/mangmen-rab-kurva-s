@@ -33,6 +33,7 @@ interface BackupExportModalProps {
   currentProject: Project;
   allProjects: Project[];
   onImportProjects: (importedProjects: Project[]) => void;
+  onRecoverPhotos?: () => void | Promise<void>;
 }
 
 export const BackupExportModal: React.FC<BackupExportModalProps> = ({
@@ -41,12 +42,14 @@ export const BackupExportModal: React.FC<BackupExportModalProps> = ({
   currentProject,
   allProjects,
   onImportProjects,
+  onRecoverPhotos,
 }) => {
   const { t, language } = useLanguage();
   const [activeTab, setActiveTab] = useState<'export' | 'restore'>('export');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
   const [storageInfo, setStorageInfo] = useState<{ usedMB: number; quotaMB: number; percent: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -395,6 +398,51 @@ export const BackupExportModal: React.FC<BackupExportModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Emergency Cache Recovery if forgot to backup */}
+              {onRecoverPhotos && (
+                <div className="p-4 rounded-xl bg-gradient-to-r from-amber-950/60 to-slate-900 border border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="p-1 rounded-md bg-amber-500/20 text-amber-400">
+                        <Sparkles className="w-4 h-4" />
+                      </span>
+                      <strong className="text-white text-sm">Lupa Buat File Backup? Pulihkan dari Cache</strong>
+                    </div>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      Sistem menyimpan jejak foto dan histori snapshot pada database lokal (IndexedDB Photo Vault). Jika Anda lupa membuat file backup sebelum login ulang, klik tombol di samping untuk memulihkannya.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isRecovering}
+                    onClick={async () => {
+                      setIsRecovering(true);
+                      try {
+                        await onRecoverPhotos();
+                        showNotification('Pemindaian cache browser selesai!');
+                      } catch (err: any) {
+                        showNotification(`Gagal memulihkan: ${err.message}`, true);
+                      } finally {
+                        setIsRecovering(false);
+                      }
+                    }}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow transition-colors shrink-0 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isRecovering ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                        <span>Memindai...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 text-slate-950" />
+                        <span>Pindai &amp; Pulihkan Cache</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
 
               <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/60 text-xs space-y-2 text-slate-300">
                 <div className="font-bold text-white flex items-center gap-1.5 text-amber-400">

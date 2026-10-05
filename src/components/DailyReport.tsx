@@ -46,6 +46,7 @@ interface DailyReportProps {
   onAddDailyReport: (newReport: Omit<DailyReportItem, 'id' | 'createdAt'>) => void;
   onDeleteDailyReport: (reportId: string) => void;
   onUpdateDailyReport?: (updatedReport: DailyReportItem) => void;
+  onRecoverPhotos?: () => void | Promise<void>;
 }
 
 export const DailyReport: React.FC<DailyReportProps> = ({
@@ -53,10 +54,12 @@ export const DailyReport: React.FC<DailyReportProps> = ({
   onAddDailyReport,
   onDeleteDailyReport,
   onUpdateDailyReport,
+  onRecoverPhotos,
 }) => {
   const { t, language } = useLanguage();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [isScanningRecovery, setIsScanningRecovery] = useState(false);
   // Manage photos modal for existing report
   const [managePhotosReport, setManagePhotosReport] = useState<DailyReportItem | null>(null);
   const [managePhotosList, setManagePhotosList] = useState<string[]>([]);
@@ -426,6 +429,29 @@ export const DailyReport: React.FC<DailyReportProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {onRecoverPhotos && (
+            <button
+              onClick={async () => {
+                setIsScanningRecovery(true);
+                try {
+                  await onRecoverPhotos();
+                } finally {
+                  setIsScanningRecovery(false);
+                }
+              }}
+              disabled={isScanningRecovery}
+              className="flex items-center gap-1.5 px-3 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-xs rounded-xl border border-amber-300 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              title="Pindai dan hubungkan kembali foto dokumentasi dari cache browser perangkat"
+            >
+              {isScanningRecovery ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
+              ) : (
+                <Sparkles className="w-4 h-4 text-amber-600" />
+              )}
+              <span>Pindai Cache Foto</span>
+            </button>
+          )}
+
           <button
             onClick={() => exportDailyReportsToCsv(project)}
             className="flex items-center gap-1.5 px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 shadow-xs transition-colors cursor-pointer"
@@ -461,6 +487,48 @@ export const DailyReport: React.FC<DailyReportProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Reassurance Banner if any report has missing photos */}
+      {onRecoverPhotos &&
+        project.dailyReports.some((r) => {
+          const p = Array.isArray(r.photoUrls) && r.photoUrls.length > 0 ? r.photoUrls.filter(Boolean) : r.photoUrl ? [r.photoUrl] : [];
+          return p.length === 0;
+        }) && (
+          <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-300 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs animate-fadeIn">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0 mt-0.5">
+                <Sparkles className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="space-y-0.5">
+                <p className="font-bold text-slate-900 text-sm">
+                  Foto Dokumentasi Belum Tampil Setelah Login Ulang?
+                </p>
+                <p className="text-slate-600 leading-relaxed text-[11px] sm:text-xs">
+                  Foto fisik Anda yang sudah pernah diupdate tersimpan aman di <strong>Photo Vault lokal perangkat Anda</strong> (terpisah dari batasan 1MB cloud). Klik tombol untuk menautkan dan menampilkan kembali seluruh foto secara otomatis.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                setIsScanningRecovery(true);
+                try {
+                  await onRecoverPhotos();
+                } finally {
+                  setIsScanningRecovery(false);
+                }
+              }}
+              disabled={isScanningRecovery}
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl shadow-xs transition-all shrink-0 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 active:scale-95"
+            >
+              {isScanningRecovery ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+              ) : (
+                <Sparkles className="w-4 h-4 text-slate-950" />
+              )}
+              <span>Pindai &amp; Pulihkan Foto</span>
+            </button>
+          </div>
+        )}
 
       {submitSuccessMsg && (
         <div className="p-4 bg-emerald-50 text-emerald-800 rounded-2xl text-xs flex items-center gap-2 border border-emerald-200 shadow-sm">

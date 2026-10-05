@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Project } from '../types/project';
 import { calculateSCurvePoints, getProjectKPI, formatPercent, formatIDR } from '../utils/calculator';
 import { SCurveChart } from './SCurveChart';
-import { generateProjectPdfReport } from '../utils/pdfExporter';
+import { generateProjectPdfReport, generateStandaloneSCurvePdf } from '../utils/pdfExporter';
 import { useLanguage } from '../i18n/LanguageContext';
 import {
   TrendingUp,
@@ -67,14 +67,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  const handleExportPdf = async () => {
+  const handleExportPdf = async (mode: 'full' | 'scurve-only' = 'full') => {
     try {
       setIsExportingPdf(true);
       setExportSuccessMsg(null);
-      await generateProjectPdfReport(project, {
-        chartElementId: 's-curve-chart-container',
-      });
-      setExportSuccessMsg(language === 'id' ? 'Laporan PDF berhasil diunduh!' : 'PDF Report downloaded successfully!');
+      if (mode === 'scurve-only') {
+        await generateStandaloneSCurvePdf(project);
+        setExportSuccessMsg(
+          language === 'id'
+            ? 'Lembar Kurva S Landscape A4 berhasil diunduh!'
+            : 'Standalone S-Curve PDF downloaded!'
+        );
+      } else {
+        await generateProjectPdfReport(project, {
+          chartElementId: 's-curve-chart-container',
+          includeSCurvePage: true,
+        });
+        setExportSuccessMsg(
+          language === 'id'
+            ? 'Laporan Lengkap + Halaman Kurva S berhasil diunduh!'
+            : 'Full PDF Report with S-Curve Sheet downloaded!'
+        );
+      }
       setTimeout(() => setExportSuccessMsg(null), 4000);
     } catch (err) {
       console.error('Failed to export PDF:', err);
@@ -145,10 +159,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
             )}
 
             <button
-              onClick={handleExportPdf}
+              onClick={() => handleExportPdf('scurve-only')}
+              disabled={isExportingPdf}
+              className="flex items-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-800 text-sky-300 font-bold text-xs rounded-xl border border-sky-500/40 hover:border-sky-400 transition-all shadow-md cursor-pointer disabled:opacity-50"
+              title="Unduh 1 Lembar Khusus Kurva S Landscape A4 Resmi lengkap dengan Matriks Jadwal Mingguan dan Pengesahan"
+            >
+              <FileText className="w-4 h-4 text-sky-400" />
+              <span>Lembar Kurva S (A4)</span>
+            </button>
+
+            <button
+              onClick={() => handleExportPdf('full')}
               disabled={isExportingPdf}
               className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-60 text-slate-950 font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer hover:scale-[1.02]"
-              title="Unduh Laporan Format PDF"
+              title="Unduh Laporan Lengkap PDF (Eksekutif + Halaman Kurva S + Detail RAB + Dokumentasi)"
             >
               {isExportingPdf ? (
                 <>
@@ -158,7 +182,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  <span>Export Laporan PDF</span>
+                  <span>Export Laporan Lengkap PDF</span>
                 </>
               )}
             </button>
@@ -358,17 +382,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
               )}
 
               <button
-                onClick={handleExportPdf}
+                onClick={() => handleExportPdf('scurve-only')}
                 disabled={isExportingPdf}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs rounded-xl transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-                title="Cetak Laporan Kurva S PDF"
+                title="Cetak Lembar Kurva S Landscape A4 Resmi"
               >
                 {isExportingPdf ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
                 ) : (
-                  <Download className="w-3.5 h-3.5 text-amber-600" />
+                  <Printer className="w-3.5 h-3.5 text-amber-600" />
                 )}
-                <span>Unduh PDF</span>
+                <span>Unduh Kurva S (A4)</span>
               </button>
 
               <button

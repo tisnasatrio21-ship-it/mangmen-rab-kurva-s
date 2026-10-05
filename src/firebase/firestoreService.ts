@@ -11,6 +11,8 @@ import {
 import { db, auth } from './config';
 import { handleFirestoreError, OperationType, getQuotaExceeded, setQuotaExceeded, isQuotaExceededError } from './firestoreErrors';
 import { Project } from '../types/project';
+import { generateCloudThumbnail } from '../utils/photoWatermark';
+import { saveAllProjectPhotosToVault } from '../utils/indexedDbStorage';
 
 const PROJECTS_COLLECTION = 'projects';
 
@@ -88,9 +90,60 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
     return;
   }
 
+  // 1. Permanently vault full-resolution photos in local IndexedDB first
+  try {
+    await saveAllProjectPhotosToVault(project);
+  } catch (vaultErr) {
+    console.warn('Photo vault pre-sync note:', vaultErr);
+  }
+
   const docPath = `${PROJECTS_COLLECTION}/${project.id}`;
   try {
     const currentUserId = auth.currentUser?.uid;
+
+    // 2. Prepare lightweight cloud daily reports with optimized thumbnails (~10-15KB)
+    // This allows photos to remain visible across all devices and logins without exceeding 1MB limit.
+    const cloudDailyReports = await Promise.all(
+      (project.dailyReports || []).map(async (r: any) => {
+        let pUrl = r.photoUrl || '';
+        let pUrls = Array.isArray(r.photoUrls) ? [...r.photoUrls] : [];
+
+        // If primary photo is high-res base64, generate compact cloud thumbnail
+        if (typeof pUrl === 'string' && pUrl.startsWith('data:image') && pUrl.length > 25000) {
+          try {
+            pUrl = await generateCloudThumbnail(pUrl);
+          } catch {
+            // Keep original if thumbnail fails
+          }
+        }
+
+        // Keep thumbnails for up to 3 photos in cloud copy to protect document size
+        if (pUrls.length > 0) {
+          const sliceToProcess = pUrls.slice(0, 3);
+          const thumbUrls = await Promise.all(
+            sliceToProcess.map(async (u) => {
+              if (typeof u === 'string' && u.startsWith('data:image') && u.length > 25000) {
+                try {
+                  return await generateCloudThumbnail(u);
+                } catch {
+                  return u;
+                }
+              }
+              return u;
+            })
+          );
+          pUrls = thumbUrls;
+        }
+
+        return {
+          ...r,
+          photoUrl: pUrl,
+          photoUrls: pUrls,
+          hasLocalPhotosOnly: false,
+        };
+      })
+    );
+
     let projectData: any = {
       id: project.id,
       name: project.name,
@@ -106,7 +159,7 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
       ownerId: currentUserId || 'anonymous',
       rabItems: project.rabItems || [],
       plannedDistributions: project.plannedDistributions || [],
-      dailyReports: project.dailyReports || [],
+      dailyReports: cloudDailyReports,
       lastUpdateDate: project.lastUpdateDate || new Date().toISOString().split('T')[0],
       updatedAt: project.updatedAt || new Date().toISOString(),
     };
@@ -122,23 +175,14 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
 
     let payloadSize = getPayloadSize(projectData);
 
-    // If payload exceeds 850KB, sanitize heavy photos for the cloud copy
+    // If payload still exceeds 850KB, keep primary photo thumbnail only for cloud sync
     if (payloadSize > 850000 && Array.isArray(projectData.dailyReports)) {
-      console.warn(`Project payload is large (${payloadSize} bytes). Optimizing photo data for cloud sync...`);
-      const lightReports = projectData.dailyReports.map((r: any) => {
-        let pUrl = r.photoUrl || '';
-        let pUrls = Array.isArray(r.photoUrls) ? [...r.photoUrls] : [];
-        // Keep primary photo if compact, otherwise omit in cloud sync to protect metadata
-        if (pUrl.length > 70000) {
-          pUrl = '';
-        }
-        pUrls = pUrls.filter((u) => typeof u === 'string' && u.length <= 70000);
-        return {
-          ...r,
-          photoUrl: pUrl,
-          photoUrls: pUrls,
-        };
-      });
+      console.warn(`Project payload is large (${payloadSize} bytes). Trimming to primary thumbnails for cloud sync...`);
+      const lightReports = projectData.dailyReports.map((r: any) => ({
+        ...r,
+        photoUrl: r.photoUrl || '',
+        photoUrls: r.photoUrl ? [r.photoUrl] : [],
+      }));
       projectData = { ...projectData, dailyReports: lightReports };
     }
 

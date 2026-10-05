@@ -24,42 +24,51 @@ export function stampProjectUpdated(project: Project): Project {
 }
 
 /**
- * Merges two daily report items, prioritizing valid photos and descriptions
+ * Merges two daily report items, strictly guarding against photo loss when cloud data
+ * has stripped or compressed photos.
  */
 function mergeDailyReportItem(primary: DailyReportItem, fallback?: DailyReportItem): DailyReportItem {
   if (!fallback) return primary;
 
-  const primaryHasPhotos =
-    (Array.isArray(primary.photoUrls) && primary.photoUrls.length > 0) ||
-    Boolean(primary.photoUrl);
+  const primaryPhotos = Array.isArray(primary.photoUrls) && primary.photoUrls.length > 0
+    ? primary.photoUrls.filter(Boolean)
+    : primary.photoUrl ? [primary.photoUrl] : [];
 
-  const fallbackHasPhotos =
-    (Array.isArray(fallback.photoUrls) && fallback.photoUrls.length > 0) ||
-    Boolean(fallback.photoUrl);
+  const fallbackPhotos = Array.isArray(fallback.photoUrls) && fallback.photoUrls.length > 0
+    ? fallback.photoUrls.filter(Boolean)
+    : fallback.photoUrl ? [fallback.photoUrl] : [];
 
-  // If primary has no photos but fallback does, preserve fallback photos!
   let resolvedPhotoUrl = primary.photoUrl;
   let resolvedPhotoUrls = primary.photoUrls;
 
-  if (!primaryHasPhotos && fallbackHasPhotos) {
-    resolvedPhotoUrl = fallback.photoUrl;
-    resolvedPhotoUrls = fallback.photoUrls;
-  } else if (primaryHasPhotos && fallbackHasPhotos) {
-    // If fallback has more photos than primary (e.g. cloud truncated), combine or keep richer
-    const pCount = (primary.photoUrls?.length || 0);
-    const fCount = (fallback.photoUrls?.length || 0);
-    if (fCount > pCount) {
-      resolvedPhotoUrls = fallback.photoUrls;
-      resolvedPhotoUrl = fallback.photoUrl || fallback.photoUrls?.[0] || primary.photoUrl;
+  if (primaryPhotos.length === 0 && fallbackPhotos.length > 0) {
+    // Primary has no photos but fallback does: ALWAYS keep fallback photos!
+    resolvedPhotoUrl = fallbackPhotos[0];
+    resolvedPhotoUrls = fallbackPhotos;
+  } else if (fallbackPhotos.length > primaryPhotos.length) {
+    // Fallback has more photos (e.g. cloud truncated extra photos): keep fallback photos!
+    resolvedPhotoUrl = fallbackPhotos[0];
+    resolvedPhotoUrls = fallbackPhotos;
+  } else if (fallbackPhotos.length > 0 && primaryPhotos.length > 0) {
+    // Both have photos: check if fallback has higher resolution (longer data URL) than primary
+    const fallbackSize = (fallbackPhotos[0] || '').length;
+    const primarySize = (primaryPhotos[0] || '').length;
+    if (fallbackSize > primarySize && fallbackSize > 20000) {
+      // Fallback is higher resolution local photo, prioritize it over cloud compressed thumbnail
+      resolvedPhotoUrl = fallbackPhotos[0];
+      resolvedPhotoUrls = fallbackPhotos;
     }
   }
 
   return {
     ...primary,
-    photoUrl: resolvedPhotoUrl,
-    photoUrls: resolvedPhotoUrls,
+    photoUrl: resolvedPhotoUrl || primary.photoUrl || fallback.photoUrl,
+    photoUrls: resolvedPhotoUrls && resolvedPhotoUrls.length > 0 ? resolvedPhotoUrls : fallback.photoUrls || [],
     notes: primary.notes || fallback.notes,
     reporterName: primary.reporterName || fallback.reporterName,
+    volumeProgress: primary.volumeProgress ?? fallback.volumeProgress,
+    weightAdded: primary.weightAdded ?? fallback.weightAdded,
+    percentageAdded: primary.percentageAdded ?? fallback.percentageAdded,
   };
 }
 

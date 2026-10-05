@@ -14,7 +14,13 @@ import { DeviceManagementModal } from './components/DeviceManagementModal';
 import { AiProjectAdvisorModal } from './components/AiProjectAdvisorModal';
 import { generateAutoPlannedDistributions, recalculateRabItems } from './utils/calculator';
 import { optimizeProjectPhotos } from './utils/photoWatermark';
-import { saveProjectsToIDB, loadProjectsFromIDB } from './utils/indexedDbStorage';
+import {
+  saveProjectsToIDB,
+  loadProjectsFromIDB,
+  hydrateProjectPhotosFromVault,
+  scanAndRecoverPhotosFromStorage,
+  saveReportPhotosToVault,
+} from './utils/indexedDbStorage';
 import { mergeProjectLists, stampProjectUpdated } from './utils/projectSync';
 import { useFirebase } from './firebase/FirebaseContext';
 import { getQuotaExceeded } from './firebase/firestoreErrors';
@@ -284,13 +290,17 @@ export default function App() {
   useEffect(() => {
     if (user) {
       if (cloudProjects && cloudProjects.length > 0) {
-        setProjects((current) => {
-          const merged = mergeProjectLists(current, cloudProjects);
-          return merged;
-        });
-        setActiveProjectId((prevId) => {
-          const exists = cloudProjects.some((p) => p.id === prevId);
-          return exists ? prevId : cloudProjects[0].id;
+        // Hydrate any cloud projects with local high-res photos from Photo Vault
+        Promise.all(cloudProjects.map((p) => hydrateProjectPhotosFromVault(p))).then((hydratedList) => {
+          const listWithVaultPhotos = hydratedList.map((h) => h.project);
+          setProjects((current) => {
+            const merged = mergeProjectLists(current, listWithVaultPhotos);
+            return merged;
+          });
+          setActiveProjectId((prevId) => {
+            const exists = cloudProjects.some((p) => p.id === prevId);
+            return exists ? prevId : cloudProjects[0].id;
+          });
         });
       } else if (projects.length > 0 && !hasSeededCloudRef.current && !isQuotaExceeded && !getQuotaExceeded()) {
         hasSeededCloudRef.current = true;
@@ -395,6 +405,30 @@ export default function App() {
     updateAndSyncProject(updated);
   };
 
+  // Toast for photo recovery feedback
+  const [photoRecoveryNotice, setPhotoRecoveryNotice] = useState<string | null>(null);
+
+  // Scanner function to recover photos from browser storage
+  const handleRecoverPhotos = async () => {
+    try {
+      const res = await scanAndRecoverPhotosFromStorage(projects);
+      if (res.recoveredCount > 0) {
+        setProjects(res.projects);
+        setPhotoRecoveryNotice(
+          `🎉 Berhasil memulihkan ${res.recoveredCount} foto dokumentasi ke ${res.restoredReportsCount} laporan harian! Semua foto telah diamankan ke Photo Vault perangkat.`
+        );
+      } else {
+        setPhotoRecoveryNotice(
+          'ℹ️ Hasil Pindai: Semua foto dokumentasi yang tersimpan di perangkat Anda sudah aktif dan tertaut sempurna.'
+        );
+      }
+      setTimeout(() => setPhotoRecoveryNotice(null), 7000);
+    } catch (e: any) {
+      setPhotoRecoveryNotice(`Pindai foto gagal: ${e.message}`);
+      setTimeout(() => setPhotoRecoveryNotice(null), 5000);
+    }
+  };
+
   // Handle adding Daily Report
   const handleAddDailyReport = (
     newReportData: Omit<DailyReportItem, 'id' | 'createdAt'>
@@ -404,6 +438,14 @@ export default function App() {
       id: `rep-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
+
+    // Permanently vault high-res photos to local IndexedDB Photo Vault
+    const photosToVault = Array.isArray(newReport.photoUrls) && newReport.photoUrls.length > 0
+      ? newReport.photoUrls
+      : newReport.photoUrl ? [newReport.photoUrl] : [];
+    if (photosToVault.length > 0) {
+      saveReportPhotosToVault(newReport.id, photosToVault).catch(console.warn);
+    }
 
     const updated: Project = {
       ...currentProject,
@@ -426,6 +468,14 @@ export default function App() {
 
   // Handle updating an existing Daily Report (e.g. adding more photos)
   const handleUpdateDailyReport = (updatedReport: DailyReportItem) => {
+    // Permanently vault high-res photos to local IndexedDB Photo Vault
+    const photosToVault = Array.isArray(updatedReport.photoUrls) && updatedReport.photoUrls.length > 0
+      ? updatedReport.photoUrls
+      : updatedReport.photoUrl ? [updatedReport.photoUrl] : [];
+    if (photosToVault.length > 0) {
+      saveReportPhotosToVault(updatedReport.id, photosToVault).catch(console.warn);
+    }
+
     const updated: Project = {
       ...currentProject,
       dailyReports: currentProject.dailyReports.map((r) =>
@@ -595,6 +645,25 @@ export default function App() {
           </div>
         )}
 
+        {/* Toast for Photo Recovery feedback */}
+        {photoRecoveryNotice && (
+          <div className="p-4 rounded-xl bg-amber-950 text-amber-200 border border-amber-500 shadow-xl flex items-center justify-between text-xs animate-fadeIn">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
+              <div>
+                <strong className="font-bold text-white text-sm">Pemulihan Foto Lapangan</strong>
+                <p className="text-amber-300 mt-0.5">{photoRecoveryNotice}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setPhotoRecoveryNotice(null)}
+              className="p-1 text-amber-400 hover:text-white rounded cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Notice if opening with approval link but not logged in as Admin */}
         {approvalUrlParam && !isMasterAdminUser && (
           <div className="p-4 rounded-xl bg-amber-950/90 text-amber-200 border border-amber-500 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
@@ -756,6 +825,7 @@ export default function App() {
             onAddDailyReport={handleAddDailyReport}
             onDeleteDailyReport={handleDeleteDailyReport}
             onUpdateDailyReport={handleUpdateDailyReport}
+            onRecoverPhotos={handleRecoverPhotos}
           />
         )}
       </main>
@@ -806,6 +876,7 @@ export default function App() {
         currentProject={currentProject}
         allProjects={projects}
         onImportProjects={handleImportProjects}
+        onRecoverPhotos={handleRecoverPhotos}
       />
 
       {/* Device Management Modal */}

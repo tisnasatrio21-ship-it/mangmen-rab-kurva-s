@@ -8,6 +8,8 @@ export interface ExportPdfOptions {
   reportNotes?: string;
   targetDailyReportId?: string; // If specified, generate daily-specific inspection sheet
   targetDate?: string; // If specified, filter daily reports by this date
+  includeSCurvePage?: boolean; // Default true: sertakan halaman khusus Kurva S resmi
+  sCurveOnly?: boolean; // Jika true, hanya unduh 1 lembar Kurva S Landscape resmi
 }
 
 /**
@@ -28,12 +30,521 @@ async function loadImg(src: string): Promise<HTMLImageElement | null> {
 }
 
 /**
+ * Menggambar 1 Halaman Penuh Landscape A4 Khusus Kurva S dengan Standar Resmi Proyek:
+ * 1. Banner Header & Strip Identitas Proyek
+ * 2. Grafik Kurva S Vektor Presisi Tinggi (Rencana Biru vs Realisasi Oranye) dengan Penanda Cut-off
+ * 3. Matriks Jadwal & Progres Mingguan (Weekly Tracking Schedule Matrix)
+ * 4. Analisis Deviasi & Rekomendasi Teknis SCM / PUPR
+ * 5. Lembar Pengesahan Resmi 3 Pihak (Kontraktor, Konsultan Pengawas MK, PPK / Owner)
+ */
+export function drawDedicatedSCurveLandscapePage(
+  doc: jsPDF,
+  project: Project,
+  printDate: string
+): void {
+  const kpi = getProjectKPI(project);
+  const sCurvePoints = calculateSCurvePoints(project);
+  const isPos = kpi.deviation >= 0;
+
+  // Colors
+  const navyColor = [15, 23, 42]; // #0f172a
+  const amberColor = [217, 119, 6]; // #d97706
+  const blueColor = [29, 78, 216]; // #1d4ed8
+  const emeraldColor = [5, 150, 105]; // #059669
+  const roseColor = [225, 29, 72]; // #e11d48
+  const slateDark = [51, 65, 85];
+  const slateLight = [248, 250, 252];
+
+  // 1. TOP HEADER BANNER (Full Width Landscape 297mm)
+  doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.rect(0, 0, 297, 13.5, 'F');
+
+  doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+  doc.rect(0, 13.5, 297, 1.5, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text('LEMBAR KURVA "S" & JADWAL PELAKSANAAN PEKERJAAN PROYEK', 14, 8);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(203, 213, 225);
+  doc.text(
+    'Standar Pengendalian Waktu & Biaya Proyek (Earned Value Management) • Sistem Monitoring RAB & Kurva S',
+    14,
+    11.8
+  );
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(251, 191, 36);
+  doc.text(`TANGGAL CETAK: ${printDate.toUpperCase()}`, 283, 8, { align: 'right' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(255, 255, 255);
+  doc.text(`Status Kinerja: ${kpi.statusText}`, 283, 11.8, { align: 'right' });
+
+  // 2. PROJECT & EVALUATION METADATA STRIP
+  const metaY = 17;
+  const metaH = 11;
+  doc.setFillColor(slateLight[0], slateLight[1], slateLight[2]);
+  doc.roundedRect(14, metaY, 269, metaH, 1.5, 1.5, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(14, metaY, 269, metaH, 1.5, 1.5, 'D');
+
+  // Col 1: Proyek & Lokasi
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  const truncatedProjName = project.name.length > 38 ? project.name.substring(0, 36) + '..' : project.name;
+  doc.text(`PROYEK: ${truncatedProjName.toUpperCase()}`, 18, metaY + 4.2);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
+  doc.text(`Lokasi: ${project.location || '-'} • Kode: ${project.code}`, 18, metaY + 8.5);
+
+  // Col 2: Kontraktor & Konsultan
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text(`Pelaksana: ${project.contractor || '-'}`, 98, metaY + 4.2);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
+  doc.text(`Pengawas: Tim Supervisi Lapangan`, 98, metaY + 8.5);
+
+  // Col 3: Nilai Kontrak & Durasi
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text(`Nilai Kontrak: ${formatIDR(project.totalContractValue)}`, 168, metaY + 4.2);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
+  doc.text(`Target Waktu: ${project.totalPeriods} Minggu (${project.startDate} s/d ${project.endDate})`, 168, metaY + 8.5);
+
+  // Col 4: Evaluasi & Deviasi
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text(`Evaluasi: Minggu ke-${kpi.currentPeriodNumber}`, 238, metaY + 4.2);
+  doc.setFontSize(7.5);
+  doc.setTextColor(isPos ? emeraldColor[0] : roseColor[0], isPos ? emeraldColor[1] : roseColor[1], isPos ? emeraldColor[2] : roseColor[2]);
+  const devText = isPos ? `+${kpi.deviation.toFixed(2)}% (Mendahului)` : `${kpi.deviation.toFixed(2)}% (Terlambat)`;
+  doc.text(`Deviasi: ${devText}`, 238, metaY + 8.5);
+
+  // 3. HIGH-PRECISION S-CURVE GRAPH CARD
+  const chartCardY = 30;
+  const chartCardH = 75;
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(14, chartCardY, 269, chartCardH, 1.5, 1.5, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(14, chartCardY, 269, chartCardH, 1.5, 1.5, 'D');
+
+  // Chart Title inside Card
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text('GRAFIK KURVA "S" PROGRES KUMULATIF PEKERJAAN (RENCANA VS AKTUAL)', 18, chartCardY + 5.5);
+
+  // Chart Legend (top-right inside card)
+  let legX = 145;
+  const legY = chartCardY + 4.5;
+  doc.setFontSize(6.8);
+  doc.setFont('helvetica', 'bold');
+
+  // Blue: Rencana
+  doc.setFillColor(blueColor[0], blueColor[1], blueColor[2]);
+  doc.rect(legX, legY - 2.2, 5, 2.5, 'F');
+  doc.setTextColor(30, 58, 138);
+  doc.text('Rencana (Planned)', legX + 6.5, legY);
+
+  // Amber: Realisasi
+  legX += 34;
+  doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+  doc.rect(legX, legY - 2.2, 5, 2.5, 'F');
+  doc.setTextColor(146, 64, 14);
+  doc.text('Realisasi (Actual)', legX + 6.5, legY);
+
+  // Red dashed line: Cut-Off
+  legX += 34;
+  doc.setDrawColor(roseColor[0], roseColor[1], roseColor[2]);
+  doc.setLineWidth(0.4);
+  doc.line(legX, legY - 1, legX + 5, legY - 1);
+  doc.setTextColor(roseColor[0], roseColor[1], roseColor[2]);
+  doc.text(`Posisi Mg-${kpi.currentPeriodNumber}`, legX + 6.5, legY);
+
+  // Graph plotting canvas boundaries
+  const plotX0 = 28;
+  const plotX1 = 276;
+  const plotW = plotX1 - plotX0; // 248 mm wide
+  const plotY0 = chartCardY + 9;  // 100% level
+  const plotY1 = chartCardY + 68; // 0% level
+  const plotH = plotY1 - plotY0;  // 59 mm high
+
+  const totalPeriods = Math.max(1, project.totalPeriods || 12);
+  const getY = (pct: number) => plotY1 - (Math.max(0, Math.min(100, pct)) / 100) * plotH;
+  const getX = (p: number) => plotX0 + (p / totalPeriods) * plotW;
+
+  // Horizontal Grid Lines (0%, 20%, 40%, 60%, 80%, 100%)
+  const gridSteps = [0, 20, 40, 60, 80, 100];
+  doc.setLineWidth(0.15);
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'normal');
+
+  gridSteps.forEach((pct) => {
+    const gy = getY(pct);
+    doc.setDrawColor(pct === 0 || pct === 100 ? 203 : 241, pct === 0 || pct === 100 ? 213 : 245, pct === 0 || pct === 100 ? 225 : 249);
+    doc.line(plotX0, gy, plotX1, gy);
+
+    doc.setTextColor(100, 116, 139);
+    doc.text(`${pct}%`, plotX0 - 2, gy + 1.5, { align: 'right' });
+  });
+
+  // Vertical Period Grid Lines & X-Axis Labels
+  for (let p = 1; p <= totalPeriods; p++) {
+    const px = getX(p);
+    doc.setDrawColor(241, 245, 249);
+    doc.setLineWidth(0.15);
+    doc.line(px, plotY0, px, plotY1);
+
+    // Period label at bottom
+    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(6);
+    doc.text(`Mg-${p}`, px, plotY1 + 3.5, { align: 'center' });
+  }
+
+  // Draw Planned Cumulative S-Curve (Royal Blue)
+  doc.setDrawColor(blueColor[0], blueColor[1], blueColor[2]);
+  doc.setLineWidth(0.7);
+  let prevX = getX(0);
+  let prevY = getY(0);
+
+  for (let p = 1; p <= totalPeriods; p++) {
+    const pt = sCurvePoints.find((item) => item.periodNumber === p);
+    const planVal = pt ? pt.plannedCumulative : 0;
+    const curX = getX(p);
+    const curY = getY(planVal);
+
+    doc.setDrawColor(blueColor[0], blueColor[1], blueColor[2]);
+    doc.setLineWidth(0.7);
+    doc.line(prevX, prevY, curX, curY);
+
+    // Blue Node
+    doc.setFillColor(blueColor[0], blueColor[1], blueColor[2]);
+    doc.circle(curX, curY, 0.9, 'FD');
+
+    prevX = curX;
+    prevY = curY;
+  }
+
+  // Draw Actual Cumulative S-Curve (Amber / Gold)
+  const activePeriods = sCurvePoints.filter(
+    (pt) => pt.isCompletedPeriod && pt.actualCumulative !== null && pt.actualCumulative !== undefined
+  );
+
+  if (activePeriods.length > 0) {
+    doc.setDrawColor(amberColor[0], amberColor[1], amberColor[2]);
+    doc.setLineWidth(0.9);
+    prevX = getX(0);
+    prevY = getY(0);
+
+    activePeriods.forEach((pt) => {
+      const curX = getX(pt.periodNumber);
+      const curY = getY(pt.actualCumulative);
+
+      doc.setDrawColor(amberColor[0], amberColor[1], amberColor[2]);
+      doc.setLineWidth(0.9);
+      doc.line(prevX, prevY, curX, curY);
+
+      // Amber Node
+      doc.setFillColor(amberColor[0], amberColor[1], amberColor[2]);
+      doc.circle(curX, curY, 1.2, 'FD');
+
+      prevX = curX;
+      prevY = curY;
+    });
+
+    // Highlight Cut-off Period on Graph
+    const cutOffX = getX(kpi.currentPeriodNumber);
+    doc.setDrawColor(roseColor[0], roseColor[1], roseColor[2]);
+    doc.setLineWidth(0.35);
+    doc.line(cutOffX, plotY0, cutOffX, plotY1);
+
+    // Current Actual Progress Callout Badge
+    const lastPt = activePeriods[activePeriods.length - 1];
+    if (lastPt) {
+      const badgeX = Math.min(plotX1 - 32, Math.max(plotX0 + 5, getX(lastPt.periodNumber) - 15));
+      const badgeY = Math.max(plotY0 + 2, getY(lastPt.actualCumulative) - 7);
+
+      doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+      doc.roundedRect(badgeX, badgeY, 30, 5.2, 1, 1, 'F');
+      doc.setTextColor(251, 191, 36);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.text(`Aktual: ${lastPt.actualCumulative.toFixed(2)}%`, badgeX + 15, badgeY + 3.8, { align: 'center' });
+    }
+  }
+
+  // 4. WEEKLY PROGRESS SCHEDULE MATRIX TABLE (Matriks Jadwal Progres Mingguan)
+  const tableY = 107;
+  const labelColW = 39;
+  const remainingTableW = 269 - labelColW;
+  const periodColW = Math.max(6, remainingTableW / totalPeriods);
+
+  const rows = [
+    { label: 'Rencana Mingguan (%)', field: 'plannedIncremental', format: (val: number) => `${val.toFixed(2)}%` },
+    { label: 'Kumulatif Rencana (%)', field: 'plannedCumulative', format: (val: number) => `${val.toFixed(2)}%`, bold: true },
+    { label: 'Realisasi Mingguan (%)', field: 'actualIncremental', format: (val: number, pt: any) => pt.isCompletedPeriod ? `${val.toFixed(2)}%` : '-' },
+    { label: 'Kumulatif Realisasi (%)', field: 'actualCumulative', format: (val: number, pt: any) => pt.isCompletedPeriod && val !== null ? `${val.toFixed(2)}%` : '-', bold: true, isActual: true },
+    { label: 'Deviasi Progres (+/- %)', field: 'deviation', format: (val: number, pt: any) => pt.isCompletedPeriod ? `${val >= 0 ? '+' : ''}${val.toFixed(2)}%` : '-', bold: true, isDev: true },
+  ];
+
+  // Header Row (Minggu Ke)
+  const headerH = 5.2;
+  doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.rect(14, tableY, labelColW, headerH, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.text('Uraian / Minggu Ke-', 16, tableY + 3.6);
+
+  for (let p = 1; p <= totalPeriods; p++) {
+    const colX = 14 + labelColW + (p - 1) * periodColW;
+    const isCurrent = p === kpi.currentPeriodNumber;
+    doc.setFillColor(isCurrent ? 217 : navyColor[0], isCurrent ? 119 : navyColor[1], isCurrent ? 6 : navyColor[2]);
+    doc.rect(colX, tableY, periodColW, headerH, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(totalPeriods > 16 ? 5.5 : 6.2);
+    doc.text(`W${p}`, colX + periodColW / 2, tableY + 3.6, { align: 'center' });
+  }
+
+  // Data Rows
+  let curRowY = tableY + headerH;
+  const rowH = 4.6;
+
+  rows.forEach((rowMeta, rIdx) => {
+    const isEven = rIdx % 2 === 0;
+    doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
+    doc.rect(14, curRowY, labelColW, rowH, 'F');
+    doc.setDrawColor(226, 232, 240);
+    doc.line(14, curRowY + rowH, 283, curRowY + rowH);
+
+    doc.setFont('helvetica', rowMeta.bold ? 'bold' : 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(rowMeta.isActual ? 180 : rowMeta.isDev ? 15 : 51, rowMeta.isActual ? 83 : rowMeta.isDev ? 23 : 65, rowMeta.isActual ? 9 : rowMeta.isDev ? 42 : 85);
+    doc.text(rowMeta.label, 16, curRowY + 3.3);
+
+    for (let p = 1; p <= totalPeriods; p++) {
+      const colX = 14 + labelColW + (p - 1) * periodColW;
+      const pt = sCurvePoints.find((item) => item.periodNumber === p);
+      const val = pt ? (pt as any)[rowMeta.field] : 0;
+      const formatted = pt ? rowMeta.format(val, pt) : '-';
+
+      doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
+      doc.rect(colX, curRowY, periodColW, rowH, 'F');
+
+      if (rowMeta.isDev && pt && pt.isCompletedPeriod) {
+        const isDPos = val >= 0;
+        doc.setTextColor(isDPos ? 5 : 225, isDPos ? 150 : 29, isDPos ? 105 : 72);
+        doc.setFont('helvetica', 'bold');
+      } else if (rowMeta.isActual && pt && pt.isCompletedPeriod) {
+        doc.setTextColor(180, 83, 9);
+        doc.setFont('helvetica', 'bold');
+      } else if (rowMeta.bold) {
+        doc.setTextColor(30, 58, 138);
+        doc.setFont('helvetica', 'bold');
+      } else {
+        doc.setTextColor(71, 85, 105);
+        doc.setFont('helvetica', 'normal');
+      }
+
+      doc.setFontSize(totalPeriods > 16 ? 5 : 6);
+      doc.text(formatted, colX + periodColW / 2, curRowY + 3.3, { align: 'center' });
+    }
+
+    curRowY += rowH;
+  });
+
+  // 5. BOTTOM SECTION: VARIANCE EVALUATION (LEFT) & TRIPARTITE SIGNOFF (RIGHT)
+  const bottomY = 138;
+  const bottomH = 43;
+
+  // Left Card: Analisis & Catatan Evaluasi Kurva S
+  const evalCardW = 110;
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(14, bottomY, evalCardW, bottomH, 1.5, 1.5, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(14, bottomY, evalCardW, bottomH, 1.5, 1.5, 'D');
+
+  doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.rect(14, bottomY, evalCardW, 5.5, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('CATATAN EVALUASI & PENGENDALIAN KINERJA PROYEK', 18, bottomY + 3.8);
+
+  doc.setFontSize(6.8);
+  doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`• Status Evaluasi Minggu ke-${kpi.currentPeriodNumber}:`, 18, bottomY + 10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(
+    `  Target Rencana: ${formatPercent(kpi.currentPlanned)} | Realisasi: ${formatPercent(kpi.currentActual)} | Deviasi: ${isPos ? '+' : ''}${kpi.deviation.toFixed(2)}%`,
+    18,
+    bottomY + 14
+  );
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('• Rekomendasi Teknis Pengawasan:', 18, bottomY + 19);
+  doc.setFont('helvetica', 'normal');
+
+  let recommendationText = '';
+  if (isPos) {
+    recommendationText =
+      'Kinerja fisik berjalan melampaui target rencana. Pengawas menyarankan kontraktor mempertahankan ritme pasokan material, koordinasi tenaga kerja, dan kesiapan gambar kerja lanjutan.';
+  } else if (kpi.deviation >= -5) {
+    recommendationText =
+      'Terjadi keterlambatan minor (< 5%). Diperlukan penambahan jam lembur terarah, pengamanan material lintasan kritis, serta monitoring harian untuk mencegah eskalasi deviasi negatif.';
+  } else {
+    recommendationText =
+      'PERINGATAN SCM (Deviasi Kritis > -5%): Kontraktor diwajibkan menyusun Catch-up Schedule resmi, menambah shift kerja dan alat berat sesuai instruksi Direksi Pengawas/PUPR.';
+  }
+
+  const splitRec = doc.splitTextToSize(recommendationText, evalCardW - 8);
+  doc.text(splitRec, 18, bottomY + 23);
+
+  doc.setFontSize(6);
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    '* Sesuai pedoman teknis evaluasi berkala pelaksanaan pekerjaan konstruksi.',
+    18,
+    bottomY + bottomH - 3
+  );
+
+  // Right Card: Lembar Pengesahan 3 Pihak (Tripartite Signature Block)
+  const sigCardX = 128;
+  const sigCardW = 155;
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(sigCardX, bottomY, sigCardW, bottomH, 1.5, 1.5, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(sigCardX, bottomY, sigCardW, bottomH, 1.5, 1.5, 'D');
+
+  doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.rect(sigCardX, bottomY, sigCardW, 5.5, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text('LEMBAR PENGESAHAN EVALUASI LAPORAN (3 PIHAK)', sigCardX + 4, bottomY + 3.8);
+
+  const sigColW = (sigCardW - 12) / 3;
+  const sigPositions = [
+    {
+      title: 'Disiapkan Oleh:',
+      role: 'Kontraktor Pelaksana',
+      name: project.contractor || 'PT. Kontraktor Pelaksana',
+      position: 'Project Manager / Site Manager',
+      x: sigCardX + 4,
+    },
+    {
+      title: 'Diperiksa & Disetujui:',
+      role: 'Konsultan Pengawas / MK',
+      name: 'Tim Supervisi Lapangan',
+      position: 'Site Engineer / Team Leader',
+      x: sigCardX + 4 + sigColW + 2,
+    },
+    {
+      title: 'Mengetahui & Menyetujui:',
+      role: 'Pengguna Jasa / Owner',
+      name: project.client || 'Pejabat Pembuat Komitmen (PPK)',
+      position: 'Direksi Teknis / PPK',
+      x: sigCardX + 4 + (sigColW + 2) * 2,
+    },
+  ];
+
+  sigPositions.forEach((col) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.2);
+    doc.setTextColor(100, 116, 139);
+    doc.text(col.title, col.x, bottomY + 9.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.8);
+    doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+    doc.text(col.role, col.x, bottomY + 13.5);
+
+    // Signature Line
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.line(col.x, bottomY + 33, col.x + sigColW - 2, bottomY + 33);
+
+    // Signee Name & Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(15, 23, 42);
+    const signeeName = col.name.length > 24 ? col.name.substring(0, 22) + '..' : col.name;
+    doc.text(signeeName, col.x, bottomY + 37);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(col.position, col.x, bottomY + 40.5);
+  });
+
+  // Footer on S-Curve Page
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text(
+    `Dokumen Pengendalian Proyek Resmi • ${project.name} • Lembar Kurva S A4 Landscape • Dicetak: ${printDate}`,
+    148,
+    205,
+    { align: 'center' }
+  );
+}
+
+/**
+ * Generate ONLY the official 1-page S-Curve sheet in A4 Landscape format
+ */
+export async function generateStandaloneSCurvePdf(
+  project: Project,
+  options: { chartElementId?: string } = {}
+): Promise<void> {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const printDate = new Date().toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  drawDedicatedSCurveLandscapePage(doc, project, printDate);
+
+  const cleanName = project.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  doc.save(`Lembar_Kurva_S_${cleanName}_${project.code}.pdf`);
+}
+
+/**
  * Generate a clean, professional PDF Executive Progress Report with Photos & Daily Inspections
  */
 export async function generateProjectPdfReport(
   project: Project,
   options: ExportPdfOptions = {}
 ): Promise<void> {
+  // If user requested only the S-Curve sheet, route directly to standalone generator
+  if (options.sCurveOnly) {
+    return generateStandaloneSCurvePdf(project, options);
+  }
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -220,43 +731,7 @@ export async function generateProjectPdfReport(
 
   currentY += cardHeight + 8;
 
-  // --- S-CURVE CHART CAPTURE (IF CONTAINER ID PROVIDED) ---
-  if (options.chartElementId) {
-    const chartEl = document.getElementById(options.chartElementId);
-    if (chartEl) {
-      try {
-        const canvas = await html2canvas(chartEl, {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff',
-        });
-        const imgData = canvas.toDataURL('image/png');
-        
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
-        doc.text('GRAFIK KURVA S (RENCANA VS AKTUAL)', 14, currentY);
-        currentY += 3;
-
-        const imgWidth = 182;
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        const constrainedHeight = Math.min(imgHeight, 55);
-
-        doc.addImage(imgData, 'PNG', 14, currentY, imgWidth, constrainedHeight);
-        currentY += constrainedHeight + 8;
-      } catch (err) {
-        console.warn('Could not capture S-Curve chart canvas:', err);
-      }
-    }
-  }
-
-  // --- CATEGORY PROGRESS SUMMARY TABLE ---
-  if (currentY > 215) {
-    doc.addPage();
-    currentY = 18;
-  }
-
+  // --- CATEGORY PROGRESS SUMMARY TABLE (ON PAGE 1 WITH FULL BREATHING ROOM) ---
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
@@ -306,19 +781,34 @@ export async function generateProjectPdfReport(
     currentY += 6.5;
   });
 
-  currentY += 8;
+  // Footer text on Page 1
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text(
+    `Halaman 1 • Ringkasan Eksekutif & Bobot Kategori • ${project.name} • Dicetak: ${printDate}`,
+    105,
+    288,
+    { align: 'center' }
+  );
 
-  // --- PAGE BREAK FOR DETAIL ITEM TABLE ---
-  doc.addPage();
+  // --- PAGE 2: DEDICATED OFFICIAL S-CURVE & SCHEDULE TRACKING MATRIX (LANDSCAPE A4) ---
+  if (options.includeSCurvePage !== false) {
+    doc.addPage('a4', 'landscape');
+    drawDedicatedSCurveLandscapePage(doc, project, printDate);
+  }
+
+  // --- PAGE 3: DETAIL ITEM PEKERJAAN & REALISASI (RETURN TO PORTRAIT) ---
+  doc.addPage('a4', 'portrait');
   currentY = 15;
 
-  // Header on Page 2
+  // Header on Page 3
   doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
   doc.rect(0, 0, 210, 12, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.text(`RINCIAN ITEM PEKERJAAN & REALISASI - ${project.name}`, 14, 8);
+  doc.text(`RINCIAN ITEM PEKERJAAN & REALISASI VOLUME - ${project.name}`, 14, 8);
 
   currentY = 18;
 
@@ -344,7 +834,7 @@ export async function generateProjectPdfReport(
 
   project.rabItems.forEach((item, idx) => {
     if (currentY > 265) {
-      doc.addPage();
+      doc.addPage('a4', 'portrait');
       currentY = 15;
       renderDetailTableHeader(currentY);
       currentY += 7;
@@ -412,7 +902,7 @@ export async function generateProjectPdfReport(
 
   // If there are reports with photos or daily entries, attach Photo Documentation Pages
   if (reportsToDisplay.length > 0) {
-    doc.addPage();
+    doc.addPage('a4', 'portrait');
     currentY = 15;
 
     // Header Banner
@@ -454,7 +944,7 @@ export async function generateProjectPdfReport(
 
       // Check if page needs break
       if (currentY + cardH > 270) {
-        doc.addPage();
+        doc.addPage('a4', 'portrait');
         currentY = 15;
         doc.setFillColor(navyColor[0], navyColor[1], navyColor[2]);
         doc.rect(0, 0, 210, 12, 'F');
@@ -552,7 +1042,7 @@ export async function generateProjectPdfReport(
 
   // --- SIGN-OFF / APPROVAL BLOCK ---
   if (currentY > 230) {
-    doc.addPage();
+    doc.addPage('a4', 'portrait');
     currentY = 20;
   }
 
@@ -593,17 +1083,19 @@ export async function generateProjectPdfReport(
   doc.line(142, currentY + 20, 142 + colW, currentY + 20);
   doc.text('Tanggal & Tanda Tangan', 142, currentY + 24);
 
-  // Add Page Numbers footer to all pages
+  // Add Page Numbers footer to all pages (dynamically centered for portrait & landscape)
   const totalPages = doc.getNumberOfPages();
   for (let page = 1; page <= totalPages; page++) {
     doc.setPage(page);
+    const pW = doc.internal.pageSize.getWidth();
+    const pH = doc.internal.pageSize.getHeight();
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(148, 163, 184);
     doc.text(
       `Halaman ${page} dari ${totalPages} • Laporan Progres Proyek ${project.code}`,
-      105,
-      288,
+      pW / 2,
+      pH - 6.5,
       { align: 'center' }
     );
   }
